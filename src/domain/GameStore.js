@@ -96,19 +96,22 @@ function defaultWeeklyMissions() {
 const ULTIMATE_COOLDOWN_TICKS = 65;
 const ULTIMATE_MANUAL_GRACE_TICKS = 10;
 
+// stage 1의 enemyHp/reward/upgradeCost는 #nextEnemy()의 검증된 성장 공식을 그대로 stage 18
+// 기준값(원본 프로토타입에서 가져온 데모용 시작 지점)에서 역산해 구한 값이다 — 곡선 자체를
+// 새로 만든 게 아니라 같은 곡선의 다른 지점을 쓰는 것뿐이다.
 const INITIAL_BATTLE = {
-  stage: 18,
-  attack: 1250000n,
+  stage: 1,
+  attack: 120000n,
   attackLevel: 1,
-  enemyHp: 48000000n,
-  enemyMaxHp: 48000000n,
-  reward: 30000000n,
-  upgradeCost: 1000000000n,
+  enemyHp: 2879033n,
+  enemyMaxHp: 2879033n,
+  reward: 2787773n,
+  upgradeCost: 93000000n,
   partyIndex: 0,
-  partyMaxHp: 2000000n,
-  partyHp: 2000000n,
+  partyMaxHp: 120000n,
+  partyHp: 120000n,
   elapsedMs: 0,
-  maxStageCleared: 18,
+  maxStageCleared: 0,
   consecutiveLosses: 0,
   // 슬롯 0~4의 궁극기 준비까지 남은 틱. 0 이하면 준비 완료, 음수는 수동 모드에서 대기 중인
   // 유예 틱(-ULTIMATE_MANUAL_GRACE_TICKS에 닿으면 자동으로 발동).
@@ -119,9 +122,9 @@ function cloneInitialState() {
   const heroes = {};
   ['루나리아', '이그니스', '실바나', '버블', '클로버'].forEach(name => { heroes[name] = createHeroRecord(); });
   return {
-    gems: 12840n,
-    gold: 2480000000n,
-    pity: 72,
+    gems: 10000000n, // 테스트 빌드용: 소환을 넉넉히 테스트할 수 있게 높게 잡음
+    gold: 3000000n,
+    pity: 0,
     pickupGuaranteed: false,
     materials: { wood: 120, stone: 80, starDew: 45, starIron: 60, starPowder: 0 },
     starBond: 0,
