@@ -1,6 +1,6 @@
 import { $, $$ } from '../dom/dom.js';
 import { formatUnit } from '../domain/units.js';
-import { STAGE_NAMES, chapterBackgroundPath, enemyImagePath, heroSdImagePath } from '../domain/heroCatalog.js';
+import { STAGE_NAMES, chapterBackgroundPath, enemyImagePath, heroSdImagePath, heroRoleOf } from '../domain/heroCatalog.js';
 import { battleVfx } from './battleVfx.js';
 
 let travelling = false;
@@ -326,7 +326,8 @@ export function tickAdventure(store, toast) {
   const enemySprite = $('#enemySprite');
   const attacker = $(`.unit[data-slot-index="${result.attackerIndex}"]`);
   const attackerName = store.state.party[result.attackerIndex]?.name;
-  if (attacker) {
+  const isMeleeAttacker = ['수호', '전사'].includes(heroRoleOf(attackerName));
+  if (attacker && isMeleeAttacker) {
     const scene = $('#battleScene');
     if (scene.offsetParent !== null) {
       const unitRect = attacker.getBoundingClientRect();
