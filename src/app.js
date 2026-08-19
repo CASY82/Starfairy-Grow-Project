@@ -15,6 +15,7 @@ import { initLabyrinthView, refreshLabyrinthView } from './views/labyrinthView.j
 import { initSummonView, refreshSummonView } from './views/summonView.js';
 import { initMenuView, refreshMenuView } from './views/menuView.js';
 import { initCinematic } from './views/cinematic.js';
+import { initIdleSystemsView, refreshIdleSystemsView } from './views/idleSystemsView.js';
 
 const store = new GameStore();
 const audio = new SoundManager();
@@ -37,6 +38,21 @@ function refreshAll() {
   refreshLabyrinthView(store);
   refreshSummonView(store);
   refreshMenuView(store);
+  refreshIdleSystemsView(store);
+}
+
+function navigateTo(pageName, segment = null) {
+  $$('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.target === pageName));
+  $$('.page').forEach(page => page.classList.toggle('active', page.dataset.page === pageName));
+  if (segment) {
+    const root = pageName === 'spirits' ? '#spiritsSegment' : pageName === 'adventure' ? '#adventureSegment' : null;
+    if (root) {
+      $$(`${root} .seg-btn`).forEach(b => b.classList.toggle('active', b.dataset.segment === segment));
+      $$(`[data-page="${pageName}"] .segment-panel`).forEach(panel => panel.classList.toggle('active', panel.dataset.segmentPanel === segment));
+    }
+  }
+  if (pageName === 'adventure') showAdventureView(store);
+  refreshAll();
 }
 
 function goToSpiritsParty() {
@@ -57,6 +73,7 @@ initTowerView({ store, toast, onChange: refreshAll });
 initLabyrinthView({ store, toast, onChange: refreshAll });
 initSummonView({ store, toast, onPull: (count, bannerType) => cinematic.pull(count, bannerType) });
 initMenuView({ store, toast, onChange: refreshAll });
+initIdleSystemsView({ store, toast, onChange: refreshAll, onNavigate: navigateTo });
 
 // ------------------------------------------------------------------ 하단 탭
 $$('.nav-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -102,13 +119,20 @@ $('#resetBtn').addEventListener('click', () => {
 
 // -------------------------------------------------------------- 저장/전투
 window.addEventListener('beforeunload', () => store.saveGame());
-document.addEventListener('visibilitychange', () => { if (document.hidden) store.saveGame(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) store.saveGame();
+  else {
+    store.prepareIdleReward();
+    refreshAll();
+    refreshIdleSystemsView(store, { present: true });
+  }
+});
 
 let battleTimer = null;
 function startBattleTimer() {
   if (battleTimer) clearInterval(battleTimer);
   const interval = store.state.battleSpeed === 2 ? 400 : 800;
-  battleTimer = setInterval(() => tickAdventure(store, toast), interval);
+  battleTimer = setInterval(() => { if (!document.hidden) tickAdventure(store, toast); }, interval);
 }
 window.addEventListener('battle-speed-changed', startBattleTimer);
 
@@ -117,5 +141,6 @@ document.documentElement.dataset.textSize = store.state.settings.textSize;
 $$('#textSizeControl .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.size === store.state.settings.textSize));
 
 refreshAll();
+refreshIdleSystemsView(store, { present: true });
 startBattleTimer();
-setInterval(() => { store.checkResets(); store.saveGame(); refreshAll(); }, 5000);
+setInterval(() => { if (!document.hidden) { store.checkResets(); store.saveGame(); refreshAll(); } }, 5000);

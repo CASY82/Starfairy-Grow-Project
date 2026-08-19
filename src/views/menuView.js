@@ -87,7 +87,7 @@ export function initMenuView({ store, toast, onChange }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'starlight-save-v3.json';
+    link.download = 'starlight-save-v4.json';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast.show('저장 파일을 내보냈습니다.');

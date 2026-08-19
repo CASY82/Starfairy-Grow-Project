@@ -487,6 +487,7 @@
       backdrop-filter: blur(20px);
     }
     .nav-btn {
+      position: relative;
       display: flex;
       min-width: 0;
       align-items: center;
@@ -891,6 +892,18 @@
     .seg-btn.locked { opacity: .45; }
     .segment-panel { display: none; }
     .segment-panel.active { display: block; }
+    .idle-card { margin-top:12px; padding:14px; border:1px solid var(--line); border-radius:18px; background:var(--panel); }
+    .idle-card h3 { margin:0 0 6px; font-size:14px; }
+    .idle-card p { margin:4px 0; color:var(--muted); font-size:10px; line-height:1.55; }
+    .idle-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; }
+    .idle-actions button, .idle-action, .idle-select { min-height:44px; border:1px solid var(--line); border-radius:12px; background:#6550ba; color:white; font-size:10px; font-weight:850; }
+    .idle-actions button:disabled, .idle-action:disabled { opacity:.4; }
+    .idle-select { width:100%; padding:0 8px; background:#232044; }
+    .reward-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin:10px 0; }
+    .reward-grid div { padding:9px; border-radius:11px; background:rgba(255,255,255,.05); font-size:10px; text-align:center; }
+    .notice-badge { display:inline-flex; min-width:18px; height:18px; padding:0 5px; align-items:center; justify-content:center; border-radius:999px; background:#ff5d70; font-size:9px; }
+    .nav-idle-badge { position:absolute; top:4px; right:18%; width:8px; height:8px; border-radius:50%; background:#ff5d70; box-shadow:0 0 8px #ff5d70; }
+    .sheet .idle-actions { position:sticky; bottom:0; padding-top:8px; background:linear-gradient(transparent,var(--surface) 25%); }
 
     .dex-header { display: flex; align-items: center; justify-content: space-between; margin: 4px 2px 10px; font-size: 11px; color: var(--muted); }
     .dex-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -1011,6 +1024,8 @@
     <main class="pages">
       <section class="page placeholder-page" data-page="village">
         <div class="placeholder-hero"><small>STARDUST VILLAGE</small><h2>마을에 별빛이<br>돌아오고 있어요</h2><p id="idleCapText">방치 보상을 모아 천문대를 복구하고 더 먼 별의 길을 열어 보세요.</p></div>
+        <div id="idleSystemPanel"></div>
+        <div id="dispatchPanel"></div>
         <div class="quest-list" id="buildingList" aria-label="마을 건물 목록"></div>
         <div class="quest-list" id="dungeonList" aria-label="특수 던전 목록" style="margin-top:14px"></div>
       </section>
@@ -1034,6 +1049,7 @@
           <button class="seg-btn" data-segment="bounty">현상 수배</button>
           <button class="seg-btn" data-segment="tower">별자리 탑</button>
           <button class="seg-btn" data-segment="labyrinth">꿈의 미궁</button>
+          <button class="seg-btn" data-segment="memory">보스 회상</button>
         </div>
 
         <div class="segment-panel active" data-segment-panel="path">
@@ -1091,6 +1107,7 @@
         <div class="segment-panel" data-segment-panel="bounty" id="bountyPanel"></div>
         <div class="segment-panel" data-segment-panel="tower" id="towerPanel"></div>
         <div class="segment-panel" data-segment-panel="labyrinth" id="labyrinthPanel"></div>
+        <div class="segment-panel" data-segment-panel="memory" id="bossMemoryPanel"></div>
       </section>
 
       <section class="page summon-page active" data-page="summon">
@@ -1151,6 +1168,8 @@
           <h4 style="margin:14px 0 6px;font-size:11px;color:var(--muted)">주간 임무</h4>
           <div class="mission-list" id="weeklyMissionList" style="display:grid;gap:8px"></div>
         </section>
+        <section class="system-card"><h3>별빛 성장 기록</h3><div id="growthRecordList"></div></section>
+        <section class="system-card" id="returnJournalCard"><h3>복귀 일지</h3><div id="returnJournalList"></div></section>
         <section class="system-card">
           <h3>정령 교환소</h3>
           <p id="memoryStarInfo">기억의 별 0개 보유 — 최대 성급 정령의 중복 획득분으로 쌓입니다.</p>
@@ -1255,6 +1274,14 @@
       <div class="sheet-head"><h3>50스테이지 권장 성장표</h3><button class="icon-btn sheet-close" aria-label="닫기">✕</button></div>
       <div id="recommendTableContent" style="font-size:11px;line-height:1.7"></div>
     </div>
+  </div>
+
+  <div class="sheet-backdrop" id="idleRewardSheet" role="dialog" aria-modal="true" aria-labelledby="idleRewardTitle">
+    <div class="sheet"><div class="sheet-head"><h3 id="idleRewardTitle">별빛 방치 보상</h3><button class="icon-btn sheet-close" aria-label="나중에 보기">✕</button></div><div id="idleRewardContent"></div></div>
+  </div>
+
+  <div class="sheet-backdrop" id="patrolSheet" role="dialog" aria-modal="true" aria-labelledby="patrolTitle">
+    <div class="sheet"><div class="sheet-head"><h3 id="patrolTitle">안전 순찰지 지정</h3><button class="icon-btn sheet-close" aria-label="닫기">✕</button></div><div id="patrolContent"></div></div>
   </div>
 
   <div class="sheet-backdrop" id="labyrinthBuffSheet" role="dialog" aria-modal="true">

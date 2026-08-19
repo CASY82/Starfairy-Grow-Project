@@ -7,7 +7,7 @@ import {
 } from './heroCatalog.js';
 import { roleCompletionMultiplier, elementAdvantageMultiplier, partyDominantElement } from './combatFormulas.js';
 
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 const SAVE_KEY = 'starlight-spirit-product-v1';
 
 const MERGE_COSTS = [0, 1, 2, 3, 5, 8];
@@ -95,6 +95,14 @@ function defaultWeeklyMissions() {
 // 골고루 돌아가며 준비되게 한다(전부 동시에 차서 한꺼번에 쏘지 않도록).
 const ULTIMATE_COOLDOWN_TICKS = 65;
 const ULTIMATE_MANUAL_GRACE_TICKS = 10;
+const MINUTE_MS = 60000;
+const DAY_MS = 86400000;
+export const DISPATCH_TYPES = Object.freeze({
+  powder: { label: '별가루 채집', hours: 2, condition: 'roles' },
+  supply: { label: '마을 보급', hours: 4, condition: 'forest-guardian' },
+  bond: { label: '인연 답사', hours: 8, condition: 'elements' },
+  forge: { label: '대장간 심부름', hours: 8, condition: 'fighter-ranger' }
+});
 
 // stage 1의 enemyHp/reward/upgradeCost는 #nextEnemy()의 검증된 성장 공식을 그대로 stage 18
 // 기준값(원본 프로토타입에서 가져온 데모용 시작 지점)에서 역산해 구한 값이다 — 곡선 자체를
@@ -160,6 +168,12 @@ function cloneInitialState() {
     weeklyResetKey: null,
     monthKey: null,
     settings: { textSize: 'md' }
+    ,idle: { startedAt: Date.now(), lastActiveAt: Date.now(), lastIdleClaimAt: 0, idleStage: null, rewardSnapshot: null, pending: null, pendingIdleReward: null, totalClaimedMinutes: 0, maxSeenAt: Date.now() }
+    ,dispatch: { slots: [null, null], dailyKey: null, claimsToday: 0, starIronClaimsToday: 0, bondGiftClaimsToday: 0 }
+    ,bossMemory: { weekly: { key: null, rewardClaims: 0, bestMsByStage: {} }, lifetimeBest: {}, firstClaimedStages: [] }
+    ,growthRecordsClaimed: []
+    ,growthFlags: { fiveElementWin: false }
+    ,returnJournal: { active: false, startedAt: 0, expiresAt: 0, lastTriggeredAt: 0, progress: {}, claimed: false }
   };
 }
 
@@ -175,6 +189,8 @@ export default class GameStore {
 
   constructor() {
     this.loadLocalSave();
+    this.prepareIdleReward();
+    this.#prepareReturnJournal();
     this.#rolloverIfNeeded();
     this.recomputePartyStats();
   }
@@ -249,6 +265,12 @@ export default class GameStore {
       settings: { ...base.settings, ...(s.settings || {}) },
       clearedStages: Array.isArray(s.clearedStages) ? s.clearedStages : [],
       claimedDexMilestones: Array.isArray(s.claimedDexMilestones) ? s.claimedDexMilestones : []
+      ,idle: { ...base.idle, ...(s.idle || {}) }
+      ,dispatch: { ...base.dispatch, ...(s.dispatch || {}), slots: Array.isArray(s.dispatch?.slots) ? s.dispatch.slots.slice(0, 2) : (Array.isArray(s.dispatches) ? s.dispatches.slice(0, 2) : base.dispatch.slots) }
+      ,bossMemory: { ...base.bossMemory, ...(s.bossMemory || {}), weekly: { ...base.bossMemory.weekly, ...(s.bossMemory?.weekly || {}) }, lifetimeBest: { ...(s.bossMemory?.lifetimeBest || {}) }, firstClaimedStages: Array.isArray(s.bossMemory?.firstClaimedStages) ? s.bossMemory.firstClaimedStages : (s.bossMemory?.firstClears || []) }
+      ,growthRecordsClaimed: Array.isArray(s.growthRecordsClaimed) ? s.growthRecordsClaimed : []
+      ,growthFlags: { ...base.growthFlags, ...(s.growthFlags || {}) }
+      ,returnJournal: { ...base.returnJournal, ...(s.returnJournal || {}), progress: { ...(s.returnJournal?.progress || {}) } }
     };
     const savedCooldowns = data.battle.ultimateCooldowns;
     this.#battle = {
@@ -277,6 +299,7 @@ export default class GameStore {
 
   saveGame() {
     try {
+      this.#markActive();
       localStorage.setItem(SAVE_KEY, this.#stringify(this.#snapshot()));
       return { ok: true, at: new Date() };
     } catch (error) {
@@ -291,6 +314,13 @@ export default class GameStore {
   importSaveText(text) {
     if (text.length > 1024 * 1024) throw new Error('저장 파일은 1MB 이하여야 합니다.');
     this.#apply(this.#parse(text));
+    const now = Date.now();
+    this.#state.idle.pending = null;
+    this.#state.idle.pendingIdleReward = null;
+    this.#state.idle.startedAt = now;
+    this.#state.idle.lastActiveAt = now;
+    this.#state.idle.maxSeenAt = now;
+    this.#state.idle.rewardSnapshot = this.#idleSnapshot();
     this.saveGame();
   }
 
@@ -314,6 +344,10 @@ export default class GameStore {
       this.#state.bounty.exp.usesToday = 2;
       this.#state.bounty.starIron.usesToday = 2;
       Object.values(this.#state.heroes).forEach(h => { h.bondGiftsToday = 0; });
+      this.#state.dispatch.dailyKey = day;
+      this.#state.dispatch.claimsToday = 0;
+      this.#state.dispatch.starIronClaimsToday = 0;
+      this.#state.dispatch.bondGiftClaimsToday = 0;
     }
     const week = localWeekKey();
     if (this.#state.weeklyResetKey !== week) {
@@ -323,6 +357,7 @@ export default class GameStore {
       this.#state.dungeons.armory.usesWeek = 3;
       this.#state.tower.weeklyClaimedFloor = 0;
       this.#state.labyrinth = { active: false, room: 0, buffs: [], weeklyDone: false };
+      this.#state.bossMemory.weekly = { key: week, rewardClaims: 0, bestMsByStage: {} };
     }
     const month = localMonthKey();
     if (this.#state.monthKey !== month) {
@@ -600,6 +635,8 @@ export default class GameStore {
     }
     this.#checkUnlocks();
     this.#trackMission('stageClears', 1);
+    this.#journalProgress('stageKill', 1);
+    if (previousStage % 5 !== 0 && new Set(this.#state.party.map(slot => heroElementOf(slot.name))).size >= 5) this.#state.growthFlags.fiveElementWin = true;
 
     b.stage += 1;
     let looped = false;
@@ -910,6 +947,7 @@ export default class GameStore {
     hero.level += 1;
     this.#trackMission('heroLevelUp', 1);
     this.#trackMission('heroLevelUps', 1);
+    this.#journalProgress('heroGrowth', 1);
     this.recomputePartyStats();
     return { ok: true, level: hero.level };
   }
@@ -976,6 +1014,7 @@ export default class GameStore {
     if (needOwnShard) hero.ownShards -= 1;
     hero.star = next;
     this.#trackMission('merges', 1);
+    this.#journalProgress('heroGrowth', 1);
     this.recomputePartyStats();
     return { ok: true, star: next, multiplier: STAR_MULTIPLIERS[next] };
   }
@@ -1215,6 +1254,7 @@ export default class GameStore {
     if (this.#state.gems < quote.gems) return { ...quote, ok: false, reason: 'gems', shortfall: quote.gems - this.#state.gems };
     this.#state.gems -= quote.gems;
     this.#state.buildings[quote.building] += 1;
+    this.#journalProgress('building', 1);
     this.#state.buildingQueue = null;
     this.recomputePartyStats();
     return { ok: true, building: quote.building, level: this.#state.buildings[quote.building], cost: quote.gems };
@@ -1252,6 +1292,7 @@ export default class GameStore {
     m.wood -= preview.costs.wood; m.stone -= preview.costs.stone; m.starIron -= preview.costs.starIron;
     this.#state.gems -= preview.costs.gems;
     this.#state.buildings[building] = preview.to;
+    this.#journalProgress('building', preview.count);
     this.recomputePartyStats();
     return preview;
   }
@@ -1273,6 +1314,7 @@ export default class GameStore {
     if (!q) return { ok: false, reason: 'none' };
     if (Date.now() < q.completeAt) return { ok: false, reason: 'pending', remainingMs: q.completeAt - Date.now() };
     this.#state.buildings[q.building] += 1;
+    this.#journalProgress('building', 1);
     this.#state.buildingQueue = null;
     this.recomputePartyStats();
     return { ok: true, building: q.building, level: this.#state.buildings[q.building] };
@@ -1280,6 +1322,283 @@ export default class GameStore {
 
   idleCapHours() {
     return 12 + 0.5 * (this.#state.buildings.observatory - 1);
+  }
+
+  // -------------------------------------------------------------- 방치 보상·순찰
+  #defaultIdleStage() {
+    const max = Math.max(1, this.#battle.maxStageCleared || 1);
+    for (let stage = Math.min(49, max); stage >= 1; stage -= 1) if (stage % 5 !== 0) return stage;
+    return 1;
+  }
+
+  #idleSnapshot(stage = this.#state.idle.idleStage || this.#defaultIdleStage()) {
+    const safeStage = this.canSetIdleStage(stage) ? stage : this.#defaultIdleStage();
+    return { stage: safeStage, goldPerKill: this.#statsAtStage(safeStage).reward.toString() };
+  }
+
+  #markActive(now = Date.now()) {
+    const idle = this.#state.idle;
+    if (idle.pending) return;
+    idle.startedAt = now;
+    idle.lastActiveAt = now;
+    idle.maxSeenAt = Math.max(Number(idle.maxSeenAt || 0), now);
+    idle.rewardSnapshot = this.#idleSnapshot();
+  }
+
+  canSetIdleStage(stage) {
+    return Number.isInteger(stage) && stage >= 1 && stage <= this.#battle.maxStageCleared && stage % 5 !== 0;
+  }
+
+  availablePatrolStages() {
+    const result = [];
+    for (let stage = 1; stage <= Math.min(49, this.#battle.maxStageCleared); stage += 1) if (stage % 5 !== 0) result.push(stage);
+    return result;
+  }
+
+  previewIdleReward(minutes, stage = this.#state.idle.idleStage || this.#defaultIdleStage()) {
+    const safeMinutes = Math.max(0, Math.floor(minutes));
+    const previewStage = Math.max(1, Math.min(49, Number.isInteger(stage) ? stage : this.#defaultIdleStage()));
+    const snapshot = { stage: previewStage, goldPerKill: this.#statsAtStage(previewStage).reward.toString() };
+    const gold = (BigInt(snapshot.goldPerKill) * 18n * BigInt(safeMinutes)) / 100n;
+    const powderPerMinute = Math.min(43, 3 + Math.floor(snapshot.stage * .8));
+    const woodPerMinute = Math.min(11, 2 + Math.floor(snapshot.stage * .18));
+    const stonePerMinute = Math.min(7, 1 + Math.floor(snapshot.stage * .12));
+    const rawExp = Math.max(1, Math.floor(snapshot.stage / 10)) * safeMinutes;
+    const expCap = Math.max(1, Math.floor(requiredExp(this.#state.account.level) * .35));
+    return { gold, starPowder: powderPerMinute * safeMinutes, wood: woodPerMinute * safeMinutes,
+      stone: stonePerMinute * safeMinutes, accountExp: Math.min(rawExp, expCap) };
+  }
+
+  prepareIdleReward(now = Date.now()) {
+    const idle = this.#state.idle;
+    if (idle.pending || this.#battle.maxStageCleared < 10) return idle.pending;
+    const last = Number(idle.startedAt || idle.lastActiveAt || now);
+    const maxSeen = Number(idle.maxSeenAt || last);
+    if (!Number.isFinite(last) || now < last || now < maxSeen) {
+      idle.startedAt = now;
+      idle.lastActiveAt = now;
+      idle.maxSeenAt = now;
+      idle.rewardSnapshot = this.#idleSnapshot();
+      this.saveGame();
+      return { error: 'clock-reversal' };
+    }
+    const elapsedMinutes = Math.floor((now - last) / MINUTE_MS);
+    if (elapsedMinutes < 1) return null;
+    const capMinutes = Math.floor(this.idleCapHours() * 60);
+    const acceptedMinutes = Math.min(elapsedMinutes, capMinutes);
+    const snapshot = idle.rewardSnapshot || this.#idleSnapshot();
+    const rewards = this.previewIdleReward(acceptedMinutes, snapshot.stage);
+    const settlementId = `${last}:${now}:${snapshot.stage}`;
+    idle.pending = { id: settlementId, settlementId, startAt: last, endAt: now, elapsedMinutes,
+      creditedMinutes: acceptedMinutes, acceptedMinutes, capMinutes, capReached: elapsedMinutes > capMinutes,
+      capped: elapsedMinutes > capMinutes, stage: snapshot.stage, reward: rewards, rewards, createdAt: now };
+    idle.pendingIdleReward = idle.pending;
+    idle.maxSeenAt = Math.max(maxSeen, now);
+    this.saveGame();
+    return idle.pending;
+  }
+
+  claimIdleReward() {
+    const idle = this.#state.idle;
+    const pending = idle.pending;
+    if (!pending || pending.settlementId === idle.lastSettlementId) return { ok: false, reason: 'none' };
+    const r = pending.rewards;
+    this.#state.gold += BigInt(r.gold);
+    this.#state.materials.starPowder += r.starPowder;
+    this.#state.materials.wood += r.wood;
+    this.#state.materials.stone += r.stone;
+    this.#addAccountExp(r.accountExp);
+    idle.lastSettlementId = pending.settlementId;
+    idle.lastIdleClaimAt = Date.now();
+    idle.startedAt = Date.now();
+    idle.lastActiveAt = Date.now();
+    idle.totalClaimedMinutes += pending.acceptedMinutes;
+    idle.pending = null;
+    idle.pendingIdleReward = null;
+    idle.rewardSnapshot = this.#idleSnapshot();
+    this.#journalProgress('idleClaim', 1);
+    this.saveGame();
+    return { ok: true, ...pending };
+  }
+
+  setIdleStage(stage) {
+    if (this.#state.idle.pending) return { ok: false, reason: 'pending' };
+    if (!this.canSetIdleStage(stage)) return { ok: false, reason: 'invalid' };
+    const from = this.#state.idle.idleStage || this.#defaultIdleStage();
+    this.#state.idle.idleStage = stage;
+    this.#state.idle.startedAt = Date.now();
+    this.#state.idle.lastActiveAt = Date.now();
+    this.#state.idle.rewardSnapshot = this.#idleSnapshot(stage);
+    return { ok: true, from, stage };
+  }
+
+  // -------------------------------------------------------------- 정령 파견대
+  dispatchSlots() { return this.#state.buildings.hall >= 10 ? 2 : 1; }
+
+  #dispatchCondition(type, heroes) {
+    const roles = new Set(heroes.map(heroRoleOf));
+    const elements = new Set(heroes.map(heroElementOf));
+    if (type === 'powder') return roles.size >= 2;
+    if (type === 'supply') return elements.has('숲') || roles.has('수호');
+    if (type === 'bond') return elements.size >= 2;
+    if (type === 'forge') return roles.has('전사') || roles.has('사수');
+    return false;
+  }
+
+  dispatchPreview(type, heroes) {
+    const def = DISPATCH_TYPES[type];
+    if (!def) return null;
+    const conditionMet = this.#dispatchCondition(type, heroes);
+    const rate = conditionMet ? 1 : .8;
+    const tier = Math.max(1, Math.min(5, Math.ceil(this.#battle.maxStageCleared / 10)));
+    const reward = type === 'powder' ? { starPowder: Math.floor((80 + 40 * tier) * rate) }
+      : type === 'supply' ? { wood: Math.floor((100 + 50 * tier) * rate), stone: Math.floor((60 + 30 * tier) * rate) }
+        : type === 'bond' ? { bondGifts: 1, gold: (this.#statsAtStage(Math.min(49, this.#defaultIdleStage())).reward * 18n * 30n * BigInt(Math.floor(rate * 100))) / 10000n }
+          : { starIron: Math.floor((5 + 3 * tier) * rate) };
+    return { ...def, conditionMet, rate, reward };
+  }
+
+  startDispatch(slot, type, heroes, now = Date.now()) {
+    if (this.#battle.maxStageCleared < 20) return { ok: false, reason: 'locked' };
+    if (!Number.isInteger(slot) || slot < 0 || slot >= this.dispatchSlots() || this.#state.dispatch.slots[slot]) return { ok: false, reason: 'slot' };
+    if (!Array.isArray(heroes) || heroes.length !== 2 || heroes[0] === heroes[1] || heroes.some(n => !this.#state.heroes[n])) return { ok: false, reason: 'heroes' };
+    const occupied = this.#state.dispatch.slots.filter(Boolean).flatMap(d => d.heroes);
+    if (heroes.some(n => occupied.includes(n))) return { ok: false, reason: 'duplicate' };
+    const preview = this.dispatchPreview(type, heroes);
+    if (!preview) return { ok: false, reason: 'type' };
+    const id = `${now}:${slot}:${type}:${heroes.join('-')}`;
+    this.#state.dispatch.slots[slot] = { id, type, heroes: [...heroes], startedAt: now, completeAt: now + preview.hours * 3600000, preview, claimed: false };
+    this.saveGame();
+    return { ok: true, dispatch: this.#state.dispatch.slots[slot] };
+  }
+
+  claimDispatch(slot, now = Date.now()) {
+    const d = this.#state.dispatch.slots[slot];
+    if (!d || d.claimed || now < d.completeAt) return { ok: false, reason: !d ? 'none' : 'pending' };
+    if (!Number.isFinite(d.startedAt) || !Number.isFinite(d.completeAt) || d.completeAt <= d.startedAt || now < d.startedAt) {
+      this.#state.dispatch.slots[slot] = null;
+      this.saveGame();
+      return { ok: false, reason: 'clock' };
+    }
+    const daily = this.#state.dispatch;
+    if (daily.claimsToday >= 4) return { ok: false, reason: 'daily-cap' };
+    const reward = { ...d.preview.reward };
+    if (d.type === 'bond' && daily.bondGiftClaimsToday >= 1) return { ok: false, reason: 'rare-cap' };
+    if (d.type === 'forge' && daily.starIronClaimsToday >= 1) return { ok: false, reason: 'rare-cap' };
+    this.#grantSimpleReward(reward);
+    daily.claimsToday += 1;
+    if (reward.bondGifts) daily.bondGiftClaimsToday += 1;
+    if (reward.starIron && d.type === 'forge') daily.starIronClaimsToday += 1;
+    d.claimed = true;
+    this.#state.dispatch.slots[slot] = null;
+    this.#journalProgress('dispatch', 1);
+    this.saveGame();
+    return { ok: true, reward, type: d.type };
+  }
+
+  cancelDispatch(slot, now = Date.now()) {
+    const d = this.#state.dispatch.slots[slot];
+    if (!d) return { ok: false, reason: 'none' };
+    const reward = {};
+    this.#state.dispatch.slots[slot] = null;
+    this.saveGame();
+    return { ok: true, reward };
+  }
+
+  #grantSimpleReward(reward) {
+    if (reward.gold) this.#state.gold += BigInt(reward.gold);
+    if (reward.starPowder) this.#state.materials.starPowder += reward.starPowder;
+    if (reward.wood) this.#state.materials.wood += reward.wood;
+    if (reward.stone) this.#state.materials.stone += reward.stone;
+    if (reward.starIron) this.#state.materials.starIron += reward.starIron;
+    if (reward.bondGifts) this.#state.bondGifts += reward.bondGifts;
+    if (reward.starBond) this.#state.starBond += reward.starBond;
+  }
+
+  // -------------------------------------------------------------- 보스 회상전
+  unlockedBossMemories() { return [10, 20, 30, 40, 50].filter(stage => this.#state.clearedStages.includes(stage)); }
+
+  attemptBossMemory(stage, { practice = false, rewardChoice = 'gold' } = {}) {
+    if (!this.unlockedBossMemories().includes(stage)) return { ok: false, reason: 'locked' };
+    if (!practice && this.#state.bossMemory.weekly.rewardClaims >= 3) return { ok: false, reason: 'weekly-cap' };
+    const hp = this.#statsAtStage(stage).hp;
+    const attack = this.effectiveAttack();
+    const clearTime = Math.max(1, Math.ceil(Number(hp / (attack > 0n ? attack : 1n)) * .8));
+    const success = this.#battleForecast(hp).verdict === '예상 승리';
+    if (!success) return { ok: true, success: false, practice };
+    const memory = this.#state.bossMemory;
+    const previousBest = memory.lifetimeBest[stage];
+    memory.lifetimeBest[stage] = previousBest ? Math.min(previousBest, clearTime) : clearTime;
+    const weeklyBest = memory.weekly.bestMsByStage[stage];
+    memory.weekly.bestMsByStage[stage] = weeklyBest ? Math.min(weeklyBest, clearTime * 1000) : clearTime * 1000;
+    let reward = {};
+    if (!practice) {
+      memory.weekly.rewardClaims += 1;
+      reward = rewardChoice === 'powder' ? { starPowder: 100 + stage * 10 } : { gold: this.#statsAtStage(stage).reward * 2n };
+      this.#grantSimpleReward(reward);
+    }
+    if (!memory.firstClaimedStages.includes(stage)) {
+      memory.firstClaimedStages.push(stage);
+      const first = { starPowder: 100 + stage * 10, bondGifts: 1 };
+      this.#grantSimpleReward(first);
+      reward.first = first;
+    }
+    this.#journalProgress('bossMemory', 1);
+    this.saveGame();
+    return { ok: true, success: true, practice, clearTime, newBest: !previousBest || clearTime < previousBest, reward };
+  }
+
+  // -------------------------------------------------------------- 성장 기록·복귀 일지
+  growthRecords() {
+    const heroes = Object.entries(this.#state.heroes);
+    const records = [
+      { id: 'collect10', label: '정령 10종 획득', done: heroes.length >= 10, reward: { gold: 1000000n } },
+      { id: 'common4', label: 'Common 정령 4성 달성', done: heroes.some(([n,h]) => heroRarityOf(n) === 'common' && h.star >= 4), reward: { starPowder: 500 } },
+      { id: 'fiveElements', label: '서로 다른 5속성으로 일반 스테이지 승리', done: this.#state.growthFlags.fiveElementWin, reward: { gold: 2000000n } },
+      { id: 'boss5', label: '보스 5종 회상 클리어', done: this.#state.bossMemory.firstClaimedStages.length >= 5, reward: { bondGifts: 2 } },
+      { id: 'build30', label: '건물 총합 Lv.30', done: Object.values(this.#state.buildings).reduce((a,b) => a+b, 0) >= 30, reward: { starPowder: 700 } },
+      { id: 'idle100', label: '방치 보상 100시간 수령', done: this.#state.idle.totalClaimedMinutes >= 6000, reward: { starBond: 200 } }
+    ];
+    return records.map(r => ({ ...r, claimed: this.#state.growthRecordsClaimed.includes(r.id) }));
+  }
+
+  claimGrowthRecord(id) {
+    const record = this.growthRecords().find(r => r.id === id);
+    if (!record || !record.done || record.claimed) return { ok: false };
+    this.#grantSimpleReward(record.reward);
+    this.#state.growthRecordsClaimed.push(id);
+    return { ok: true, reward: record.reward };
+  }
+
+  #prepareReturnJournal(now = Date.now()) {
+    const j = this.#state.returnJournal;
+    const last = Number(this.#state.idle.startedAt || this.#state.idle.lastActiveAt || now);
+    if (!j.active && now - last >= 72 * 3600000 && now - Number(j.lastTriggeredAt || 0) >= 30 * DAY_MS) {
+      this.#state.returnJournal = { active: true, startedAt: now, expiresAt: now + 14 * DAY_MS, lastTriggeredAt: now,
+        progress: { idleClaim: 0, heroGrowth: 0, stageKill: 0, bounty: 0, building: 0, dispatch: 0, bossMemory: 0 }, claimed: false };
+    }
+  }
+
+  #journalProgress(key, amount) {
+    const j = this.#state.returnJournal;
+    if (!j.active || j.claimed || Date.now() > j.expiresAt) return;
+    j.progress[key] = (j.progress[key] || 0) + amount;
+  }
+
+  returnJournalStatus() {
+    const j = this.#state.returnJournal;
+    if (j.active && Date.now() > j.expiresAt) { j.active = false; j.progress = {}; }
+    const targets = { idleClaim: 1, heroGrowth: 3, stageKill: 10, bounty: 2, building: 1, dispatch: 2, bossMemory: 1 };
+    return { ...j, targets, complete: j.active && Object.entries(targets).every(([k,v]) => (j.progress[k] || 0) >= v) };
+  }
+
+  claimReturnJournal() {
+    const status = this.returnJournalStatus();
+    if (!status.complete || status.claimed) return { ok: false };
+    this.#state.starBond += 300;
+    this.#state.returnJournal.claimed = true;
+    this.#state.returnJournal.active = false;
+    return { ok: true, reward: { starBond: 300 } };
   }
 
   // -------------------------------------------------------------- 특수 던전
@@ -1345,6 +1664,7 @@ export default class GameStore {
       reward = { starIron: s };
     }
     this.#trackMission('bountyWins', 1);
+    this.#journalProgress('bounty', 1);
     return { ok: true, success: true, reward };
   }
 
