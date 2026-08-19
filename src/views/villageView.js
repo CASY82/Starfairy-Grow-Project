@@ -1,4 +1,6 @@
 import { $ } from '../dom/dom.js';
+import { formatUnit } from '../domain/units.js';
+import { confirmAction } from '../dom/confirm.js';
 
 const BUILDING_META = {
   observatory: { icon: '🏛️', name: '천문대', effect: '방치 보상 상한 +0.5시간/Lv' },
@@ -35,6 +37,8 @@ function renderBuildingSheet(store) {
   const maxed = level >= 20;
   const busy = queue && !ownQueue;
   const canAfford = s.materials.wood >= cost.wood && s.materials.stone >= cost.stone && s.materials.starIron >= cost.starIron;
+  const instantQuote = ownQueue ? store.buildingInstantFinishCost() : null;
+  const bulkPreview = !queue && !maxed ? store.previewBulkUpgradeBuilding(key) : null;
   let actionLabel = `Lv.${level + 1} 업그레이드 시작`;
   let action = 'upgrade';
   let disabled = false;
@@ -52,10 +56,28 @@ function renderBuildingSheet(store) {
       <div><strong>🗿 ${cost.stone}</strong><span>보유 ${s.materials.stone}</span></div>
       <div><strong>⭐ ${cost.starIron}</strong><span>별철 ${s.materials.starIron}</span></div>
     </div>
-    <button class="building-upgrade-btn" id="buildingUpgradeAction" data-action="${action}" ${disabled ? 'disabled' : ''}>${actionLabel}</button>`;
+    ${ownQueue && !ready ? `<div class="building-bulk-summary">남은 시간 ${formatRemaining(remainingMs)} · 즉시 완료 💎 ${formatUnit(instantQuote.gems)}</div>` : ''}
+    ${bulkPreview?.ok ? `<div class="building-bulk-summary">일괄 즉시 강화 Lv.${bulkPreview.from} → Lv.${bulkPreview.to}<br>🌲 ${bulkPreview.costs.wood} · 🗿 ${bulkPreview.costs.stone} · ⭐ ${bulkPreview.costs.starIron} · 💎 ${formatUnit(bulkPreview.costs.gems)}</div>` : ''}
+    <div class="building-action-stack">
+      <button class="building-upgrade-btn" id="buildingUpgradeAction" data-action="${action}" ${disabled ? 'disabled' : ''}>${actionLabel}</button>
+      ${ownQueue && !ready ? `<button class="building-upgrade-btn bulk-action-btn" data-action="instant-finish" ${s.gems < instantQuote.gems ? 'disabled' : ''}>💎 ${formatUnit(instantQuote.gems)} 즉시 완료</button>` : ''}
+      ${!queue && !maxed ? `<button class="building-upgrade-btn bulk-action-btn" data-action="building-bulk" ${!bulkPreview?.ok ? 'disabled' : ''}>일괄 즉시 강화${bulkPreview?.ok ? ` · ${bulkPreview.count}회` : ''}</button>` : ''}
+    </div>`;
+}
+
+function formatRemaining(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 export function initVillageView({ store, toast, onChange }) {
+  setInterval(() => {
+    if ($('#buildingUpgradeSheet').classList.contains('open') && selectedBuilding) renderBuildingSheet(store);
+  }, 1000);
+
   $('#buildingList').addEventListener('click', event => {
     const btn = event.target.closest('button[data-building]');
     if (!btn) return;
@@ -84,14 +106,30 @@ export function initVillageView({ store, toast, onChange }) {
     onChange();
   });
 
-  $('#buildingUpgradeContent').addEventListener('click', event => {
-    const btn = event.target.closest('#buildingUpgradeAction');
+  $('#buildingUpgradeContent').addEventListener('click', async event => {
+    const btn = event.target.closest('button[data-action]');
     if (!btn || !selectedBuilding) return;
-    if (btn.dataset.action === 'collect') {
+    if (btn.dataset.action === 'instant-finish') {
+      const result = store.instantFinishBuilding();
+      if (!result.ok) {
+        toast.show(result.reason === 'ready' ? '건설이 완료됐습니다. 무료로 수령하세요.' : '즉시 완료할 보석이 부족합니다.');
+        renderBuildingSheet(store);
+        return;
+      }
+      toast.show(`${BUILDING_META[result.building].name} Lv.${result.level} 즉시 완공 · 보석 ${formatUnit(result.cost)} 사용`);
+    } else if (btn.dataset.action === 'building-bulk') {
+      const preview = store.previewBulkUpgradeBuilding(selectedBuilding);
+      if (!preview.ok) return;
+      const message = `${BUILDING_META[selectedBuilding].name} Lv.${preview.from} → Lv.${preview.to}\n효과: ${BUILDING_META[selectedBuilding].effect}\n목재 ${preview.costs.wood} · 석재 ${preview.costs.stone} · 별철 ${preview.costs.starIron}\n보석 ${formatUnit(preview.costs.gems)}`;
+      if (!await confirmAction({ title: '건물 일괄 즉시 강화', message, confirmLabel: '즉시 강화' })) return;
+      const result = store.bulkUpgradeBuilding(selectedBuilding);
+      if (!result.ok) { toast.show('재화 또는 건설 상태가 변경되어 실행하지 못했습니다.'); return; }
+      toast.show(`${BUILDING_META[selectedBuilding].name} Lv.${result.from} → Lv.${result.to} · ${result.count}회 즉시 강화`);
+    } else if (btn.dataset.action === 'collect') {
       const result = store.collectBuildingUpgrade();
       if (!result.ok) { toast.show('아직 건설 중입니다.'); return; }
       toast.show(`${BUILDING_META[result.building].name} Lv.${result.level} 완공!`);
-    } else {
+    } else if (btn.dataset.action === 'upgrade') {
       const result = store.startBuildingUpgrade(selectedBuilding);
       if (!result.ok) { toast.show(result.reason === 'materials' ? '업그레이드 재료가 부족합니다.' : '현재 건설을 시작할 수 없습니다.'); return; }
       toast.show(`${BUILDING_META[selectedBuilding].name} 건설을 시작했습니다.`);

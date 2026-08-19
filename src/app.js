@@ -4,6 +4,7 @@ import { formatUnit } from './domain/units.js';
 import { heroSdImagePath } from './domain/heroCatalog.js';
 import { $, $$, createToast } from './dom/dom.js';
 import { track } from './dom/analytics.js';
+import { initConfirmAction } from './dom/confirm.js';
 
 import { initVillageView, refreshVillageView } from './views/villageView.js';
 import { initSpiritsView, refreshSpiritsView } from './views/spiritsView.js';
@@ -18,6 +19,7 @@ import { initCinematic } from './views/cinematic.js';
 const store = new GameStore();
 const audio = new SoundManager();
 const toast = createToast();
+initConfirmAction();
 
 function refreshAll() {
   $('#goldCount').textContent = formatUnit(store.state.gold);

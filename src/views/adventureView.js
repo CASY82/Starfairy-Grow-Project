@@ -1,9 +1,32 @@
 import { $, $$ } from '../dom/dom.js';
 import { formatUnit } from '../domain/units.js';
 import { STAGE_NAMES, chapterBackgroundPath, enemyImagePath, heroSdImagePath } from '../domain/heroCatalog.js';
+import { battleVfx } from './battleVfx.js';
 
 let travelling = false;
 let travelTimers = [];
+let presentationTimers = [];
+let ultimateBannerQueue = [];
+let ultimateBannerActive = false;
+
+function presentationTimeout(callback, delay) {
+  const timer = setTimeout(() => {
+    presentationTimers = presentationTimers.filter(item => item !== timer);
+    callback();
+  }, delay);
+  presentationTimers.push(timer);
+  return timer;
+}
+
+function clearBattlePresentation() {
+  presentationTimers.forEach(clearTimeout);
+  presentationTimers = [];
+  ultimateBannerQueue = [];
+  ultimateBannerActive = false;
+  $('#ultCast').classList.remove('show');
+  $('#damageLayer').replaceChildren();
+  battleVfx.clear();
+}
 
 // 첫 궁극기 준비 시 "탭하면 바로 발동" 힌트를 1회만 보여준다. 세이브 진행도가 아니라 순수
 // UI 온보딩 표시 여부라 GameStore 세이브에 넣지 않고 별도 localStorage 키로 가볍게 관리한다.
@@ -31,6 +54,9 @@ function clearTravelState() {
 
 function beginAreaTravel(store) {
   clearTravelState();
+  // Keep a short final hit trace, then guarantee that no old-enemy VFX reaches
+  // the next stage. Combat state has already been resolved by GameStore.
+  presentationTimeout(() => battleVfx.clear(), 180);
   travelling = true;
   const scene = $('#battleScene');
   const enemy = $('#enemySprite');
@@ -103,9 +129,15 @@ function updateUltSkillBar(store) {
   else if (soonest) $('#ultimateText').textContent = `${soonest.name} · ${soonest.progress}%`;
 }
 
-let ultCastHideTimer = null;
-function showUltimateCast(store, fired) {
-  if (!fired?.heroName) return;
+function drainUltimateBannerQueue() {
+  if (ultimateBannerActive || !ultimateBannerQueue.length) return;
+  ultimateBannerActive = true;
+  const fired = ultimateBannerQueue.shift();
+  if (!fired?.heroName) {
+    ultimateBannerActive = false;
+    drainUltimateBannerQueue();
+    return;
+  }
   const img = $('#ultCastImg');
   img.src = heroSdImagePath(fired.heroName);
   img.alt = fired.heroName;
@@ -114,19 +146,34 @@ function showUltimateCast(store, fired) {
   banner.classList.remove('show');
   void banner.offsetWidth;
   banner.classList.add('show');
-  clearTimeout(ultCastHideTimer);
-  ultCastHideTimer = setTimeout(() => banner.classList.remove('show'), 900);
+  presentationTimeout(() => {
+    banner.classList.remove('show');
+    ultimateBannerActive = false;
+    drainUltimateBannerQueue();
+  }, battleVfx.effectiveQuality() === 'minimal' ? 300 : 260);
+}
 
-  const pop = document.createElement('span');
-  pop.className = 'damage-pop ult';
-  pop.textContent = `ULT -${formatUnit(fired.bonus)}`;
-  pop.style.marginLeft = `${Math.round((Math.random() - 0.5) * 40)}px`;
-  $('#damageLayer').appendChild(pop);
-  setTimeout(() => pop.remove(), 900);
+function queueUltimateCast(store, fired, queueIndex = 0) {
+  if (!fired?.heroName) return;
+  ultimateBannerQueue.push(fired);
+  drainUltimateBannerQueue();
+
+  const attacker = $(`.unit[data-slot-index="${fired.slotIndex}"]`);
+  const enemy = $('#enemySprite');
+  battleVfx.playUltimate({
+    heroName: fired.heroName,
+    attackerElement: attacker,
+    targetElement: enemy,
+    speed: store.state.battleSpeed,
+    queueIndex
+  });
+
+  const hitDelay = (store.state.battleSpeed === 2 ? 320 : 480) + queueIndex * 120;
+  presentationTimeout(() => spawnDamage(fired.bonus, false, true), hitDelay);
 }
 
 function applyUltimateResult(store, toast, result) {
-  showUltimateCast(store, result);
+  queueUltimateCast(store, result, 0);
   if (result.killResult) {
     toast.show(`${result.killResult.isBoss ? 'BOSS ' : ''}STAGE ${store.battle.stage} / 50 · 💰 ${formatUnit(result.killResult.earnedReward)} 획득`);
     beginAreaTravel(store);
@@ -137,6 +184,18 @@ export function initAdventureView({ store, toast, onChange, onNavigateToParty })
   renderParty(store);
   renderUltSkillBar(store);
   updateEnemyDisplay(store);
+
+  // Navigation is owned by app.js, so observe this page's existing active flag
+  // and release all presentation work as soon as the adventure tab is hidden.
+  const adventurePage = document.querySelector('[data-page="adventure"]');
+  if (adventurePage && typeof MutationObserver === 'function') {
+    new MutationObserver(() => {
+      if (!adventurePage.classList.contains('active')) clearBattlePresentation();
+    }).observe(adventurePage, { attributes: true, attributeFilter: ['class'] });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearBattlePresentation();
+  });
 
   $$('#adventureSegment .seg-btn').forEach(btn => btn.addEventListener('click', () => {
     $$('#adventureSegment .seg-btn').forEach(b => b.classList.toggle('active', b === btn));
@@ -152,6 +211,13 @@ export function initAdventureView({ store, toast, onChange, onNavigateToParty })
       else toast.show(`골드가 ${formatUnit(result.shortfall)} 부족해요.`);
       return;
     }
+    onChange();
+  });
+
+  $('#bulkUpgradeAttack').addEventListener('click', () => {
+    const result = store.bulkUpgradeAttack();
+    if (!result.ok) return;
+    toast.show(`별빛 강화 Lv.${result.from} → Lv.${result.to} · 골드 ${formatUnit(result.costs.gold)} 사용`);
     onChange();
   });
 
@@ -203,6 +269,7 @@ export function initAdventureView({ store, toast, onChange, onNavigateToParty })
 /** 탭이 다시 보일 때 그동안 쌓인 상태 변화를 화면에 맞춘다(파티 구성은 이미 실시간으로 반영됨). */
 export function showAdventureView(store) {
   clearTravelState();
+  clearBattlePresentation();
   renderParty(store);
   renderUltSkillBar(store);
   updateEnemyDisplay(store);
@@ -212,6 +279,7 @@ export function showAdventureView(store) {
 /** 체험 데이터 초기화 시 파티 표시를 기본 덱으로 되돌린다. */
 export function resetAdventureView(store) {
   clearTravelState();
+  clearBattlePresentation();
   renderParty(store);
   renderUltSkillBar(store);
   updateEnemyDisplay(store);
@@ -229,13 +297,13 @@ function updateEnemyDisplay(store) {
   $('#battleScene').style.setProperty('--battle-offset', `${-((stage - 1) % 10) * 93}px`);
 }
 
-function spawnDamage(damage, critical) {
+function spawnDamage(damage, critical, ultimate = false) {
   const pop = document.createElement('span');
-  pop.className = `damage-pop${critical ? ' crit' : ''}`;
-  pop.textContent = `${critical ? 'CRIT ' : ''}-${formatUnit(damage)}`;
+  pop.className = `damage-pop${critical ? ' crit' : ''}${ultimate ? ' ult' : ''}`;
+  pop.textContent = `${ultimate ? 'ULT ' : critical ? 'CRIT ' : ''}-${formatUnit(damage)}`;
   pop.style.marginLeft = `${Math.round((Math.random() - 0.5) * 54)}px`;
   $('#damageLayer').appendChild(pop);
-  setTimeout(() => pop.remove(), 780);
+  presentationTimeout(() => pop.remove(), ultimate ? 900 : 780);
 }
 
 function showDefeatOverlay(defeatInfo) {
@@ -257,6 +325,7 @@ export function tickAdventure(store, toast) {
   const result = store.performAutoAttack();
   const enemySprite = $('#enemySprite');
   const attacker = $(`.unit[data-slot-index="${result.attackerIndex}"]`);
+  const attackerName = store.state.party[result.attackerIndex]?.name;
   if (attacker) {
     const scene = $('#battleScene');
     if (scene.offsetParent !== null) {
@@ -266,13 +335,18 @@ export function tickAdventure(store, toast) {
       const unitCenterX = unitRect.left + unitRect.width / 2;
       attacker.style.setProperty('--lunge-x', `${Math.max(12, targetX - unitCenterX)}px`);
     }
-    attacker.classList.add('attack');
-    setTimeout(() => attacker.classList.remove('attack'), 340);
+    if (battleVfx.effectiveQuality() !== 'minimal') attacker.classList.add('attack');
+    presentationTimeout(() => attacker.classList.remove('attack'), store.state.battleSpeed === 2 ? 240 : 340);
   }
-  enemySprite.classList.add('hit');
-  setTimeout(() => enemySprite.classList.remove('hit'), 180);
-  spawnDamage(result.damage, result.critical);
-  result.ultimatesFired.forEach(fired => showUltimateCast(store, fired));
+  battleVfx.playBasicAttack({ heroName: attackerName, attackerElement: attacker, targetElement: enemySprite,
+    critical: result.critical, speed: store.state.battleSpeed });
+  const basicHitDelay = battleVfx.effectiveQuality() === 'minimal' ? 80 : store.state.battleSpeed === 2 ? 110 : 180;
+  presentationTimeout(() => {
+    enemySprite.classList.add('hit');
+    presentationTimeout(() => enemySprite.classList.remove('hit'), 180);
+    spawnDamage(result.damage, result.critical);
+  }, basicHitDelay);
+  result.ultimatesFired.forEach((fired, index) => queueUltimateCast(store, fired, index));
 
   if (result.killed) {
     beginAreaTravel(store);
@@ -324,6 +398,13 @@ export function refreshAdventureView(store) {
   $('#rewardValue').textContent = formatUnit(b.reward);
   $('#attackLevel').textContent = b.attackLevel;
   $('#upgradeCost').textContent = formatUnit(b.upgradeCost);
+  const upgradeCap = store.upgradeCapForStage();
+  const bulkUpgrade = store.previewBulkUpgradeAttack();
+  $('#upgradeAttack').disabled = b.attackLevel >= upgradeCap || store.state.gold < b.upgradeCost;
+  $('#bulkUpgradeAttack').disabled = !bulkUpgrade.ok;
+  $('#bulkUpgradeAttack').textContent = bulkUpgrade.ok
+    ? `일괄 ${bulkUpgrade.count}회 · 💰 ${formatUnit(bulkUpgrade.costs.gold)}`
+    : bulkUpgrade.stopReason === 'cap' ? '현재 상한 도달' : '일괄 · 골드 부족';
   const hpRatio = b.enemyHp <= 0n ? 0 : Number((b.enemyHp * 10000n) / b.enemyMaxHp) / 100;
   $('#enemyHpFill').style.width = `${Math.max(0, Math.min(100, hpRatio))}%`;
 

@@ -788,6 +788,27 @@ export default class GameStore {
     return { ok: true, level: this.#battle.attackLevel };
   }
 
+  previewBulkUpgradeAttack() {
+    const from = this.#battle.attackLevel;
+    const cap = this.upgradeCapForStage();
+    let to = from;
+    let gold = this.#state.gold;
+    let cost = this.#battle.upgradeCost;
+    let spent = 0n;
+    while (to < cap && gold >= cost) {
+      gold -= cost; spent += cost; to += 1;
+      cost = (cost * 135n) / 100n;
+    }
+    return { ok: to > from, from, to, count: to - from, costs: { gold: spent }, nextCost: cost, stopReason: to >= cap ? 'cap' : 'gold', requiresConfirmation: false };
+  }
+
+  bulkUpgradeAttack() {
+    const preview = this.previewBulkUpgradeAttack();
+    if (!preview.ok) return { ...preview, reason: preview.stopReason };
+    for (let i = 0; i < preview.count; i += 1) this.upgradeAttack();
+    return preview;
+  }
+
   // -------------------------------------------------------------- 파티 편성
   #heroPower(name) {
     const hero = this.#state.heroes[name];
@@ -899,6 +920,34 @@ export default class GameStore {
     return { starPowder: 10 + hero.level * 4, gold: 800n * BigInt(hero.level), cap: Math.min(60, this.#state.account.level) };
   }
 
+  previewBulkLevelUpHero(name) {
+    const hero = this.#state.heroes[name];
+    if (!hero) return { ok: false, reason: 'not-owned', count: 0 };
+    const from = hero.level;
+    const cap = Math.min(60, this.#state.account.level);
+    let to = from;
+    let powder = this.#state.materials.starPowder;
+    let gold = this.#state.gold;
+    let spentPowder = 0;
+    let spentGold = 0n;
+    while (to < cap) {
+      const powderCost = 10 + to * 4;
+      const goldCost = 800n * BigInt(to);
+      if (powder < powderCost || gold < goldCost) break;
+      powder -= powderCost; gold -= goldCost;
+      spentPowder += powderCost; spentGold += goldCost; to += 1;
+    }
+    const stopReason = to >= cap ? 'cap' : powder < 10 + to * 4 ? 'starPowder' : 'gold';
+    return { ok: to > from, from, to, count: to - from, costs: { starPowder: spentPowder, gold: spentGold }, stopReason, requiresConfirmation: false };
+  }
+
+  bulkLevelUpHero(name) {
+    const preview = this.previewBulkLevelUpHero(name);
+    if (!preview.ok) return { ...preview, reason: preview.reason || preview.stopReason };
+    for (let i = 0; i < preview.count; i += 1) this.levelUpHero(name);
+    return preview;
+  }
+
   mergeInfoFor(name) {
     const hero = this.#state.heroes[name];
     if (!hero) return null;
@@ -931,6 +980,39 @@ export default class GameStore {
     return { ok: true, star: next, multiplier: STAR_MULTIPLIERS[next] };
   }
 
+  previewBulkMergeHero(name) {
+    const hero = this.#state.heroes[name];
+    if (!hero) return { ok: false, reason: 'not-owned', count: 0 };
+    const from = hero.star;
+    const rarity = heroRarityOf(name);
+    let to = from;
+    let pool = this.#state.shardPool[rarity];
+    let ownShards = hero.ownShards;
+    let spentPool = 0;
+    let spentOwn = 0;
+    let stopReason = 'cap';
+    const steps = [];
+    while (to < 6) {
+      const next = to + 1;
+      const cost = MERGE_COSTS[next];
+      const needOwn = next === 4 || next === 6;
+      if (pool < cost) { stopReason = 'shards'; break; }
+      if (needOwn && ownShards < 1) { stopReason = 'ownShard'; break; }
+      pool -= cost; spentPool += cost;
+      if (needOwn) { ownShards -= 1; spentOwn += 1; }
+      steps.push({ from: to, to: next, pool: cost, ownShards: needOwn ? 1 : 0 });
+      to = next;
+    }
+    return { ok: to > from, from, to, count: to - from, costs: { shards: spentPool, ownShards: spentOwn }, steps, multiplierFrom: STAR_MULTIPLIERS[from], multiplierTo: STAR_MULTIPLIERS[to], stopReason, requiresConfirmation: true };
+  }
+
+  bulkMergeHero(name) {
+    const preview = this.previewBulkMergeHero(name);
+    if (!preview.ok) return { ...preview, reason: preview.reason || preview.stopReason };
+    for (let i = 0; i < preview.count; i += 1) this.mergeHeroNamed(name);
+    return preview;
+  }
+
   giftBond(name) {
     const hero = this.#state.heroes[name];
     if (!hero) return { ok: false, reason: 'not-owned' };
@@ -955,6 +1037,29 @@ export default class GameStore {
     return { ok: true, bond: hero.bond, leveledUp };
   }
 
+  previewBulkGiftBond(name) {
+    const hero = this.#state.heroes[name];
+    if (!hero) return { ok: false, reason: 'not-owned', count: 0 };
+    let bond = hero.bond;
+    let exp = hero.bondExp;
+    const available = Math.min(3 - hero.bondGiftsToday, this.#state.bondGifts);
+    let count = 0;
+    while (count < available && bond < 10) {
+      exp += 20; count += 1;
+      const need = 100 * (bond + 1);
+      if (exp >= need) { exp -= need; bond += 1; }
+    }
+    const stopReason = bond >= 10 ? 'cap' : hero.bondGiftsToday + count >= 3 ? 'daily-limit' : 'no-gifts';
+    return { ok: count > 0, from: hero.bond, to: bond, count, bondExp: exp, costs: { bondGifts: count }, stopReason, requiresConfirmation: false };
+  }
+
+  bulkGiftBond(name) {
+    const preview = this.previewBulkGiftBond(name);
+    if (!preview.ok) return { ...preview, reason: preview.reason || preview.stopReason };
+    for (let i = 0; i < preview.count; i += 1) this.giftBond(name);
+    return preview;
+  }
+
   weaponUpgradeCostFor(name) {
     const hero = this.#state.heroes[name];
     return hero ? hero.weaponLevel * 20 : 0;
@@ -972,6 +1077,28 @@ export default class GameStore {
     return { ok: true, level: hero.weaponLevel };
   }
 
+  previewBulkUpgradeWeapon(name) {
+    const hero = this.#state.heroes[name];
+    if (!hero) return { ok: false, reason: 'not-owned', count: 0 };
+    const from = hero.weaponLevel;
+    let to = from;
+    let iron = this.#state.materials.starIron;
+    let spent = 0;
+    while (to < 20) {
+      const cost = to * 20;
+      if (iron < cost) break;
+      iron -= cost; spent += cost; to += 1;
+    }
+    return { ok: to > from, from, to, count: to - from, costs: { starIron: spent }, stopReason: to >= 20 ? 'cap' : 'materials', requiresConfirmation: false };
+  }
+
+  bulkUpgradeWeapon(name) {
+    const preview = this.previewBulkUpgradeWeapon(name);
+    if (!preview.ok) return { ...preview, reason: preview.reason || preview.stopReason };
+    for (let i = 0; i < preview.count; i += 1) this.upgradeWeaponFor(name);
+    return preview;
+  }
+
   promoteWeaponFor(name) {
     const hero = this.#state.heroes[name];
     if (!hero) return { ok: false, reason: 'not-owned' };
@@ -983,6 +1110,36 @@ export default class GameStore {
     hero.weaponStar = next;
     this.recomputePartyStats();
     return { ok: true, star: next };
+  }
+
+  weaponPromotionCostFor(name) {
+    const hero = this.#state.heroes[name];
+    return !hero || hero.weaponStar >= 5 ? 0 : BLUEPRINT_COST[hero.weaponStar + 1];
+  }
+
+  previewBulkPromoteWeapon(name) {
+    const hero = this.#state.heroes[name];
+    if (!hero) return { ok: false, reason: 'not-owned', count: 0 };
+    const from = hero.weaponStar;
+    let to = from;
+    let blueprints = this.#state.weaponBlueprint;
+    let spent = 0;
+    const steps = [];
+    while (to < 5) {
+      const cost = BLUEPRINT_COST[to + 1];
+      if (blueprints < cost) break;
+      blueprints -= cost; spent += cost;
+      steps.push({ from: to, to: to + 1, blueprints: cost });
+      to += 1;
+    }
+    return { ok: to > from, from, to, count: to - from, costs: { blueprints: spent }, steps, multiplierFrom: WEAPON_STAR_MUL[from], multiplierTo: WEAPON_STAR_MUL[to], stopReason: to >= 5 ? 'cap' : 'blueprint', requiresConfirmation: true };
+  }
+
+  bulkPromoteWeapon(name) {
+    const preview = this.previewBulkPromoteWeapon(name);
+    if (!preview.ok) return { ...preview, reason: preview.reason || preview.stopReason };
+    for (let i = 0; i < preview.count; i += 1) this.promoteWeaponFor(name);
+    return preview;
   }
 
   claimDexMilestone(count) {
@@ -1025,6 +1182,10 @@ export default class GameStore {
   // -------------------------------------------------------------- 마을 건물
   buildingUpgradeCost(building) {
     const level = this.#state.buildings[building];
+    return this.buildingUpgradeCostAt(building, level);
+  }
+
+  buildingUpgradeCostAt(building, level) {
     const base = BUILDING_BASE[building];
     const mul = Math.pow(1.32, level - 1);
     const starIron = level >= 5 ? Math.round(base.starIron * mul) : 0;
@@ -1033,7 +1194,66 @@ export default class GameStore {
 
   buildingUpgradeTimeMs(building) {
     const level = this.#state.buildings[building];
+    return this.buildingUpgradeTimeMsAt(level);
+  }
+
+  buildingUpgradeTimeMsAt(level) {
     return Math.round(5 * 60 * 1000 * Math.pow(1.32, level - 1));
+  }
+
+  buildingInstantFinishCost(now = Date.now()) {
+    const q = this.#state.buildingQueue;
+    if (!q) return { ok: false, reason: 'none', gems: 0n, remainingMs: 0 };
+    const remainingMs = Math.max(0, q.completeAt - now);
+    if (remainingMs <= 0) return { ok: false, reason: 'ready', gems: 0n, remainingMs: 0, building: q.building };
+    return { ok: true, building: q.building, remainingMs, gems: BigInt(Math.max(1, Math.ceil(remainingMs / 60000))) };
+  }
+
+  instantFinishBuilding(now = Date.now()) {
+    const quote = this.buildingInstantFinishCost(now);
+    if (!quote.ok) return quote;
+    if (this.#state.gems < quote.gems) return { ...quote, ok: false, reason: 'gems', shortfall: quote.gems - this.#state.gems };
+    this.#state.gems -= quote.gems;
+    this.#state.buildings[quote.building] += 1;
+    this.#state.buildingQueue = null;
+    this.recomputePartyStats();
+    return { ok: true, building: quote.building, level: this.#state.buildings[quote.building], cost: quote.gems };
+  }
+
+  previewBulkUpgradeBuilding(building) {
+    if (!(building in this.#state.buildings)) return { ok: false, reason: 'unknown', count: 0 };
+    if (this.#state.buildingQueue) return { ok: false, reason: 'queue', count: 0 };
+    const from = this.#state.buildings[building];
+    let to = from;
+    let wood = this.#state.materials.wood;
+    let stone = this.#state.materials.stone;
+    let starIron = this.#state.materials.starIron;
+    let gems = this.#state.gems;
+    const costs = { wood: 0, stone: 0, starIron: 0, gems: 0n };
+    const steps = [];
+    let stopReason = 'cap';
+    while (to < 20) {
+      const materialCost = this.buildingUpgradeCostAt(building, to);
+      const gemCost = BigInt(Math.max(1, Math.ceil(this.buildingUpgradeTimeMsAt(to) / 60000)));
+      if (wood < materialCost.wood || stone < materialCost.stone || starIron < materialCost.starIron) { stopReason = 'materials'; break; }
+      if (gems < gemCost) { stopReason = 'gems'; break; }
+      wood -= materialCost.wood; stone -= materialCost.stone; starIron -= materialCost.starIron; gems -= gemCost;
+      costs.wood += materialCost.wood; costs.stone += materialCost.stone; costs.starIron += materialCost.starIron; costs.gems += gemCost;
+      steps.push({ from: to, to: to + 1, ...materialCost, gems: gemCost });
+      to += 1;
+    }
+    return { ok: to > from, from, to, count: to - from, costs, steps, stopReason, requiresConfirmation: true };
+  }
+
+  bulkUpgradeBuilding(building) {
+    const preview = this.previewBulkUpgradeBuilding(building);
+    if (!preview.ok) return { ...preview, reason: preview.reason || preview.stopReason };
+    const m = this.#state.materials;
+    m.wood -= preview.costs.wood; m.stone -= preview.costs.stone; m.starIron -= preview.costs.starIron;
+    this.#state.gems -= preview.costs.gems;
+    this.#state.buildings[building] = preview.to;
+    this.recomputePartyStats();
+    return preview;
   }
 
   startBuildingUpgrade(building) {

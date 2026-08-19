@@ -296,9 +296,15 @@
       55% { transform: translate(var(--lunge-x, 14px), -4px) scale(1.14); filter: brightness(1.55); }
       100% { transform: translate(0,0) scale(1); }
     }
+    .battle-vfx-canvas { position: absolute; z-index: 5; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .battle-vfx-tint { position: absolute; z-index: 10; inset: 0; opacity: 0; pointer-events: none; background: radial-gradient(circle at 78% 58%, color-mix(in srgb,var(--vfx-tint,#fff) 16%,transparent), transparent 66%); mix-blend-mode: screen; }
+    .battle-vfx-tint.show { animation: battle-vfx-tint .42s ease-out; }
+    @keyframes battle-vfx-tint { 0% { opacity: 0; } 22% { opacity: .16; } 100% { opacity: 0; } }
     .damage-layer { position: absolute; z-index: 7; inset: 34px 0 auto; height: 190px; pointer-events: none; }
     .damage-pop { position: absolute; left: 50%; top: 45%; color: #fff1a8; text-shadow: 0 2px 3px #6b210d, 0 0 9px #ff604e; font-size: 20px; font-weight: 1000; animation: damage-rise .75s ease-out forwards; }
     .damage-pop.crit { color: #ff6575; font-size: 25px; }
+    .damage-pop.crit::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: 42px; height: 42px; border: 3px solid #ff6575; border-radius: 50%; transform: translate(-50%,-50%); animation: crit-ring .32s ease-out forwards; }
+    @keyframes crit-ring { from { opacity: .9; scale: .35; } to { opacity: 0; scale: 1.45; } }
     .damage-pop.ult { color: #ffe9ab; font-size: 26px; text-shadow: 0 2px 4px #5b3400, 0 0 12px var(--gold); }
     @keyframes damage-rise { from { opacity: 0; transform: translate(-50%,8px) scale(.7); } 25% { opacity: 1; } to { opacity: 0; transform: translate(calc(-50% + 12px),-52px) scale(1.12); } }
     .ult-cast { position: absolute; z-index: 9; left: 50%; top: 15%; display: flex; align-items: center; gap: 8px; padding: 5px 14px 5px 5px; border-radius: 999px; background: rgba(13,11,35,.88); border: 1px solid rgba(255,217,118,.55); transform: translate(-50%,-50%) scale(.75); opacity: 0; pointer-events: none; transition: transform .25s ease, opacity .25s ease; }
@@ -312,7 +318,21 @@
     .upgrade-panel { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 17px; background: var(--panel); }
     .upgrade-panel small { display: block; color: var(--muted); font-size: 9px; }
     .upgrade-panel strong { display: block; margin-top: 2px; font-size: 13px; }
-    .upgrade-btn { min-width: 128px; min-height: 45px; border: 0; border-radius: 13px; background: linear-gradient(145deg,#a27cff,#5e48c8); box-shadow: inset 0 1px rgba(255,255,255,.3); cursor: pointer; font-size: 11px; font-weight: 850; }
+    .upgrade-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; min-width: 224px; }
+    .upgrade-btn { min-width: 104px; min-height: 45px; padding: 6px 9px; border: 0; border-radius: 13px; background: linear-gradient(145deg,#a27cff,#5e48c8); box-shadow: inset 0 1px rgba(255,255,255,.3); cursor: pointer; font-size: 10px; font-weight: 850; color: white; }
+    .upgrade-btn.secondary { background: linear-gradient(145deg,#4d88a9,#365887); }
+    .upgrade-btn:disabled, .hero-detail-row button:disabled, .bulk-action-btn:disabled { opacity: .38; filter: saturate(.35); cursor: default; box-shadow: none; }
+    .hero-detail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; min-width: 154px; }
+    .hero-detail-actions button, .bulk-action-btn { min-height: 44px; padding: 6px 10px; border: 0; border-radius: 11px; background:#6550ba; color:white; font-size:9px; font-weight:850; cursor:pointer; }
+    .hero-detail-actions .bulk-action-btn { background:#367692; }
+    .building-action-stack { display:grid; gap:8px; }
+    .building-bulk-summary { margin:8px 0; color:var(--muted); font-size:9px; line-height:1.55; text-align:center; }
+    .confirm-action-message { margin:10px 0 16px; padding:14px; border:1px solid var(--line); border-radius:14px; background:rgba(255,255,255,.04); color:#ded9f4; font-size:11px; line-height:1.7; white-space:pre-line; }
+    .confirm-action-buttons { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .confirm-action-buttons button { min-height:46px; border:0; border-radius:12px; color:white; font-size:11px; font-weight:850; cursor:pointer; }
+    .confirm-action-buttons .cancel { background:#3b3950; }
+    .confirm-action-buttons .accept { background:linear-gradient(145deg,#8069db,#5842b7); }
+    @media (max-width: 390px) { .upgrade-panel { align-items:stretch; flex-direction:column; } .upgrade-actions { min-width:0; width:100%; } }
     .strategy-panel { margin-top: 8px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.045); }
     .strategy-panel small { color: var(--muted); font-size: 9px; }
     .strategy-panel strong { font-size: 11px; }
@@ -847,10 +867,18 @@
       .summon-scene.shake { animation: none; }
       .battle-bg { animation: none !important; }
       .battle-scene.travelling .party { transform: none; }
+      .battle-vfx-tint.show { animation: none; opacity: .08; }
+      .damage-pop { animation: damage-static .35s linear forwards !important; }
+      .damage-pop.crit::after { animation: none; opacity: .55; }
     }
     body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
     body.reduce-motion .battle-bg { animation: none !important; }
     body.reduce-motion .battle-scene.travelling .party { transform: none !important; transition: none !important; }
+    body.reduce-motion .unit.attack { animation: none !important; }
+    body.reduce-motion .battle-vfx-tint.show { animation: none !important; opacity: .08; }
+    body.reduce-motion .damage-pop { animation: damage-static .35s linear forwards !important; }
+    body.reduce-motion .damage-pop.crit::after { animation: none !important; opacity: .55; }
+    @keyframes damage-static { from { opacity: 1; transform: translate(-50%,0); } to { opacity: 0; transform: translate(-50%,0); } }
 
     /* ---- 미구현 기능 확장(unimplemented-features-design-spec.md) ---- */
     [data-text-size="sm"] .app { font-size: 90%; }
@@ -1016,10 +1044,12 @@
               <div class="battle-ground" aria-hidden="true"></div>
               <div class="party" id="partyRow" aria-label="자동 공격 파티"></div>
               <div class="enemy-zone"><div class="enemy-name" id="enemyName">달빛 웅덩이</div><div class="enemy" id="enemySprite"><img src="assets/images/monsters/습지_달개구리.png" alt="달빛 웅덩이" draggable="false"></div></div>
+              <canvas class="battle-vfx-canvas" id="battleVfxCanvas" aria-hidden="true"></canvas>
               <div class="battle-impact" aria-hidden="true"></div>
               <div class="travel-copy" id="travelCopy">NEXT AREA</div>
               <div class="ult-cast" id="ultCast"><img id="ultCastImg" src="" alt=""><strong id="ultCastName"></strong></div>
               <div class="damage-layer" id="damageLayer" aria-live="off"></div>
+              <div class="battle-vfx-tint" id="battleVfxTint" aria-hidden="true"></div>
             </div>
             <div class="enemy-hp">
               <div class="hp-copy"><span>HP</span><strong><span id="enemyHp">48b</span> / <span id="enemyMaxHp">48b</span></strong></div>
@@ -1039,7 +1069,10 @@
           </div>
           <div class="upgrade-panel">
             <div><small>별빛 강화 LV.<span id="attackLevel">1</span></small><strong>일반 +2% · 보스 +0.5% / Lv.</strong></div>
-            <button class="upgrade-btn" id="upgradeAttack">강화 · 💰 <span id="upgradeCost">1c</span></button>
+            <div class="upgrade-actions">
+              <button class="upgrade-btn" id="upgradeAttack">강화 · 💰 <span id="upgradeCost">1c</span></button>
+              <button class="upgrade-btn secondary" id="bulkUpgradeAttack">일괄 강화</button>
+            </div>
           </div>
           <div class="strategy-panel">
             <div class="ult-bar-head"><small>궁극기</small><strong id="ultimateText">준비 중</strong></div>
@@ -1180,6 +1213,17 @@
 
   <div class="sheet-backdrop" id="heroDetailSheet" role="dialog" aria-modal="true">
     <div class="sheet" id="heroDetailContent"></div>
+  </div>
+
+  <div class="sheet-backdrop" id="confirmActionSheet" role="dialog" aria-modal="true" aria-labelledby="confirmActionTitle">
+    <div class="sheet">
+      <div class="sheet-head"><h3 id="confirmActionTitle">일괄 강화 확인</h3></div>
+      <div class="confirm-action-message" id="confirmActionMessage"></div>
+      <div class="confirm-action-buttons">
+        <button class="cancel" id="confirmActionCancel">취소</button>
+        <button class="accept" id="confirmActionAccept">강화하기</button>
+      </div>
+    </div>
   </div>
 
   <div class="sheet-backdrop" id="buildingUpgradeSheet" role="dialog" aria-modal="true" aria-labelledby="buildingUpgradeTitle">

@@ -113,6 +113,47 @@ export function heroIconOf(name) {
   return HERO_BY_NAME[name]?.icon || '✦';
 }
 
+// Battle VFX is presentation-only metadata. Keeping it outside POOL prevents
+// visual presets from becoming an accidental part of combat/save state.
+export const HERO_VFX_PROFILES = Object.freeze({
+  '루나리아': { basicPreset: 'crescent-orb', ultimatePreset: 'eclipse-ring', glyph: 'crescent' },
+  '이그니스': { basicPreset: 'rising-flame-slash', ultimatePreset: 'inferno-greatsword', glyph: 'flame-blade' },
+  '실바나': { basicPreset: 'leaf-ribbon', ultimatePreset: 'world-tree-bloom', glyph: 'life-tree' },
+  '녹티스': { basicPreset: 'void-arrow', ultimatePreset: 'horizon-void-ray', glyph: 'void-diamond' },
+  '피로': { basicPreset: 'twin-flame-claw', ultimatePreset: 'pyro-cross', glyph: 'claw-ring' },
+  '네레이': { basicPreset: 'tide-shield', ultimatePreset: 'ocean-bulwark', glyph: 'wave-shield' },
+  '솔레아': { basicPreset: 'sun-ribbon', ultimatePreset: 'sixfold-sun', glyph: 'sun-six' },
+  '아스트라': { basicPreset: 'star-bolt', ultimatePreset: 'constellation-arrow', glyph: 'star-eight' },
+  '코멧': { basicPreset: 'ember-comet', ultimatePreset: 'meteor-drop', glyph: 'comet' },
+  '모스': { basicPreset: 'moss-seed', ultimatePreset: 'sprout-cross', glyph: 'moss-ring' },
+  '마리나': { basicPreset: 'spiral-drop', ultimatePreset: 'shell-deluge', glyph: 'shell' },
+  '브램': { basicPreset: 'gloom-shield', ultimatePreset: 'shattered-aegis', glyph: 'broken-shield' },
+  '스파크': { basicPreset: 'spark-bolt', ultimatePreset: 'ember-fan', glyph: 'spark-triangle' },
+  '듀': { basicPreset: 'dew-ribbon', ultimatePreset: 'ripple-dome', glyph: 'dew-drop' },
+  '리프': { basicPreset: 'leaf-crescent', ultimatePreset: 'verdant-wheel', glyph: 'leaf-wheel' },
+  '글림': { basicPreset: 'four-star', ultimatePreset: 'twin-star-flash', glyph: 'star-four' },
+  '애쉬': { basicPreset: 'ash-slash', ultimatePreset: 'cinder-cleave', glyph: 'ash-blade' },
+  '버블': { basicPreset: 'bubble-wave', ultimatePreset: 'great-bubble', glyph: 'bubble' },
+  '클로버': { basicPreset: 'clover-leaf', ultimatePreset: 'four-leaf-glow', glyph: 'clover' },
+  '더스크': { basicPreset: 'dusk-arrow', ultimatePreset: 'diamond-rift', glyph: 'rift-diamond' }
+});
+
+const VFX_ELEMENT_KEY = { '불꽃': 'fire', '물결': 'water', '숲': 'forest', '빛': 'light', '어둠': 'dark', '달빛': 'moonlight' };
+const VFX_ROLE_KEY = { '수호': 'guardian', '전사': 'warrior', '사수': 'ranger', '술사': 'mage', '지원': 'support' };
+
+export function heroVfxProfileOf(name) {
+  const hero = HERO_BY_NAME[name];
+  const unique = HERO_VFX_PROFILES[name];
+  if (!hero || !unique) return null;
+  return Object.freeze({
+    hero: name,
+    element: VFX_ELEMENT_KEY[hero.element] || 'light',
+    role: VFX_ROLE_KEY[hero.role] || 'mage',
+    rarity: hero.rarity,
+    ...unique
+  });
+}
+
 // §06-3 역할 완성도: 수호 > 전사 > 사수 > 술사 > 지원 순으로 전열 우선 배치(자동 편성용).
 export const ROLE_FRONT_PRIORITY = ['수호', '전사', '사수', '술사', '지원'];
 

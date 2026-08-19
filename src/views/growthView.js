@@ -1,4 +1,5 @@
 import { $ } from '../dom/dom.js';
+import { confirmAction } from '../dom/confirm.js';
 import { formatUnit } from '../domain/units.js';
 import { heroSdImagePath, weaponImagePath, RARITY_COLOR, rarityLabel, heroRarityOf, heroElementOf, heroRoleOf } from '../domain/heroCatalog.js';
 
@@ -34,7 +35,7 @@ export function initGrowthView(context) {
 
   $('#heroDetailSheet').addEventListener('click', e => { if (e.target.id === 'heroDetailSheet') closeHeroDetail(); });
 
-  $('#heroDetailContent').addEventListener('click', event => {
+  $('#heroDetailContent').addEventListener('click', async event => {
     const name = openHeroName;
     if (!name) return;
     const action = event.target.closest('button[data-action]')?.dataset.action;
@@ -49,6 +50,9 @@ export function initGrowthView(context) {
       } else {
         toast.show(`${name} Lv.${result.level}`);
       }
+    } else if (action === 'level-up-bulk') {
+      const result = store.bulkLevelUpHero(name);
+      if (result.ok) toast.show(`${name} Lv.${result.from} → Lv.${result.to} · ${result.count}회 레벨업`);
     } else if (action === 'merge') {
       const result = store.mergeHeroNamed(name);
       if (!result.ok) {
@@ -58,6 +62,11 @@ export function initGrowthView(context) {
       } else {
         toast.show(`${name}이(가) ${result.star}성이 되었습니다 · 능력치 ×${result.multiplier.toFixed(2)}`);
       }
+    } else if (action === 'merge-bulk') {
+      const preview = store.previewBulkMergeHero(name);
+      if (!preview.ok || !await confirmAction({ title: '성급 일괄 합치기', message: `${name} ★${preview.from} → ★${preview.to}\n능력치 ×${preview.multiplierFrom.toFixed(2)} → ×${preview.multiplierTo.toFixed(2)}\n동급 조각 ${preview.costs.shards} · 전용 조각 ${preview.costs.ownShards}`, confirmLabel: '합치기' })) return;
+      const result = store.bulkMergeHero(name);
+      if (result.ok) toast.show(`${name} ★${result.from} → ★${result.to} · ${result.count}회 합치기`);
     } else if (action === 'gift-bond') {
       const result = store.giftBond(name);
       if (!result.ok) {
@@ -68,6 +77,9 @@ export function initGrowthView(context) {
       } else {
         toast.show(result.leveledUp ? `${name}과(와)의 인연이 ${result.bond}단계가 되었습니다!` : '선물을 전했습니다.');
       }
+    } else if (action === 'gift-bond-bulk') {
+      const result = store.bulkGiftBond(name);
+      if (result.ok) toast.show(`${name}에게 선물 ${result.count}개 전달 · 인연 ${result.to}단계`);
     } else if (action === 'weapon-upgrade') {
       const result = store.upgradeWeaponFor(name);
       if (!result.ok) {
@@ -76,6 +88,9 @@ export function initGrowthView(context) {
       } else {
         toast.show(`무기 강화 Lv.${result.level}`);
       }
+    } else if (action === 'weapon-upgrade-bulk') {
+      const result = store.bulkUpgradeWeapon(name);
+      if (result.ok) toast.show(`무기 강화 Lv.${result.from} → Lv.${result.to} · 별철 ${result.costs.starIron} 사용`);
     } else if (action === 'weapon-promote') {
       const result = store.promoteWeaponFor(name);
       if (!result.ok) {
@@ -84,6 +99,11 @@ export function initGrowthView(context) {
       } else {
         toast.show(`무기 ★${result.star} 승급!`);
       }
+    } else if (action === 'weapon-promote-bulk') {
+      const preview = store.previewBulkPromoteWeapon(name);
+      if (!preview.ok || !await confirmAction({ title: '무기 일괄 승급', message: `${name} 무기 ★${preview.from} → ★${preview.to}\n배율 ×${preview.multiplierFrom.toFixed(2)} → ×${preview.multiplierTo.toFixed(2)}\n도면 ${preview.costs.blueprints}개 사용`, confirmLabel: '승급하기' })) return;
+      const result = store.bulkPromoteWeapon(name);
+      if (result.ok) toast.show(`무기 ★${result.from} → ★${result.to} · 도면 ${result.costs.blueprints}개 사용`);
     }
     store.saveGame();
     onChange();
@@ -111,6 +131,12 @@ function renderHeroDetail() {
   const levelCost = store.levelUpHeroCost(name);
   const mergeInfo = store.mergeInfoFor(name);
   const weaponCost = store.weaponUpgradeCostFor(name);
+  const weaponPromoteCost = store.weaponPromotionCostFor(name);
+  const bulkLevel = store.previewBulkLevelUpHero(name);
+  const bulkMerge = store.previewBulkMergeHero(name);
+  const bulkBond = store.previewBulkGiftBond(name);
+  const bulkWeapon = store.previewBulkUpgradeWeapon(name);
+  const bulkPromote = store.previewBulkPromoteWeapon(name);
   const bondNeed = 100 * (hero.bond + 1);
   const bondStoryKeys = [1, 5, 10].filter(k => hero.bond >= k);
 
@@ -129,7 +155,10 @@ function renderHeroDetail() {
       <h4>레벨업</h4>
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${hero.level >= levelCost.cap ? `상한 Lv.${levelCost.cap}(계정 레벨 연동)` : `별가루 ${levelCost.starPowder} · 골드 ${formatUnit(levelCost.gold)}`}</span>
-        <button data-action="level-up" ${hero.level >= levelCost.cap ? 'disabled' : ''}>레벨업</button>
+        <div class="hero-detail-actions">
+          <button data-action="level-up" ${hero.level >= levelCost.cap || store.state.materials.starPowder < levelCost.starPowder || store.state.gold < levelCost.gold ? 'disabled' : ''}>레벨업</button>
+          <button class="bulk-action-btn" data-action="level-up-bulk" ${!bulkLevel.ok ? 'disabled' : ''}>최대 ${bulkLevel.count}회</button>
+        </div>
       </div>
     </div>
 
@@ -137,7 +166,10 @@ function renderHeroDetail() {
       <h4>합치기</h4>
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${mergeInfo.maxed ? '최대 성급' : `${mergeInfo.next}성 · 조각 ${mergeInfo.pool}/${mergeInfo.cost}${mergeInfo.needOwnShard ? ` · 전용조각 ${mergeInfo.ownShards}/1` : ''}`}</span>
-        <button data-action="merge" ${mergeInfo.maxed || mergeInfo.pool < mergeInfo.cost || (mergeInfo.needOwnShard && mergeInfo.ownShards < 1) ? 'disabled' : ''}>${mergeInfo.maxed ? '완료' : `×${STAR_MULTIPLIER_TEXT[mergeInfo.next].toFixed(2)}`}</button>
+        <div class="hero-detail-actions">
+          <button data-action="merge" ${mergeInfo.maxed || mergeInfo.pool < mergeInfo.cost || (mergeInfo.needOwnShard && mergeInfo.ownShards < 1) ? 'disabled' : ''}>${mergeInfo.maxed ? '완료' : `×${STAR_MULTIPLIER_TEXT[mergeInfo.next].toFixed(2)}`}</button>
+          <button class="bulk-action-btn" data-action="merge-bulk" ${!bulkMerge.ok ? 'disabled' : ''}>★${bulkMerge.from}→${bulkMerge.to}</button>
+        </div>
       </div>
     </div>
 
@@ -145,7 +177,10 @@ function renderHeroDetail() {
       <h4>정령 인연</h4>
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${hero.bond >= 10 ? '최대 단계' : `${hero.bondExp}/${bondNeed} · 오늘 선물 ${hero.bondGiftsToday}/3 · 보유 선물 ${store.state.bondGifts}`}</span>
-        <button data-action="gift-bond" ${hero.bond >= 10 || hero.bondGiftsToday >= 3 || store.state.bondGifts <= 0 ? 'disabled' : ''}>선물하기</button>
+        <div class="hero-detail-actions">
+          <button data-action="gift-bond" ${hero.bond >= 10 || hero.bondGiftsToday >= 3 || store.state.bondGifts <= 0 ? 'disabled' : ''}>선물하기</button>
+          <button class="bulk-action-btn" data-action="gift-bond-bulk" ${!bulkBond.ok ? 'disabled' : ''}>모두 ${bulkBond.count}개</button>
+        </div>
       </div>
       ${bondStoryKeys.map(k => `<div class="bond-story">${BOND_STORY[k]}</div>`).join('')}
     </div>
@@ -156,11 +191,17 @@ function renderHeroDetail() {
       <div style="font-size:10px;color:var(--muted)">강화 Lv.${hero.weaponLevel}/20 · 승급 ★${hero.weaponStar}(×${WEAPON_STAR_TEXT[hero.weaponStar].toFixed(2)})</div>
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${hero.weaponLevel >= 20 ? '강화 상한' : `별철 ${weaponCost}`}</span>
-        <button data-action="weapon-upgrade" ${hero.weaponLevel >= 20 ? 'disabled' : ''}>강화</button>
+        <div class="hero-detail-actions">
+          <button data-action="weapon-upgrade" ${hero.weaponLevel >= 20 || store.state.materials.starIron < weaponCost ? 'disabled' : ''}>강화</button>
+          <button class="bulk-action-btn" data-action="weapon-upgrade-bulk" ${!bulkWeapon.ok ? 'disabled' : ''}>Lv.${bulkWeapon.from}→${bulkWeapon.to}</button>
+        </div>
       </div>
       <div class="hero-detail-row">
-        <span style="font-size:10px;color:var(--muted)">${hero.weaponStar >= 5 ? '승급 상한' : `도면 ${store.state.weaponBlueprint}개 보유`}</span>
-        <button data-action="weapon-promote" ${hero.weaponStar >= 5 ? 'disabled' : ''}>승급</button>
+        <span style="font-size:10px;color:var(--muted)">${hero.weaponStar >= 5 ? '승급 상한' : `도면 ${weaponPromoteCost} 필요 / ${store.state.weaponBlueprint} 보유`}</span>
+        <div class="hero-detail-actions">
+          <button data-action="weapon-promote" ${hero.weaponStar >= 5 || store.state.weaponBlueprint < weaponPromoteCost ? 'disabled' : ''}>승급</button>
+          <button class="bulk-action-btn" data-action="weapon-promote-bulk" ${!bulkPromote.ok ? 'disabled' : ''}>★${bulkPromote.from}→${bulkPromote.to}</button>
+        </div>
       </div>
     </div>
   `;
