@@ -1,6 +1,5 @@
 import { $ } from '../dom/dom.js';
 import { formatUnit } from '../domain/units.js';
-import { confirmAction } from '../dom/confirm.js';
 
 const BUILDING_META = {
   observatory: { icon: '🏛️', name: '천문대', effect: '방치 보상 상한 +0.5시간/Lv' },
@@ -106,7 +105,7 @@ export function initVillageView({ store, toast, onChange }) {
     onChange();
   });
 
-  $('#buildingUpgradeContent').addEventListener('click', async event => {
+  $('#buildingUpgradeContent').addEventListener('click', event => {
     const btn = event.target.closest('button[data-action]');
     if (!btn || !selectedBuilding) return;
     if (btn.dataset.action === 'instant-finish') {
@@ -120,8 +119,6 @@ export function initVillageView({ store, toast, onChange }) {
     } else if (btn.dataset.action === 'building-bulk') {
       const preview = store.previewBulkUpgradeBuilding(selectedBuilding);
       if (!preview.ok) return;
-      const message = `${BUILDING_META[selectedBuilding].name} Lv.${preview.from} → Lv.${preview.to}\n효과: ${BUILDING_META[selectedBuilding].effect}\n목재 ${preview.costs.wood} · 석재 ${preview.costs.stone} · 별철 ${preview.costs.starIron}\n보석 ${formatUnit(preview.costs.gems)}`;
-      if (!await confirmAction({ title: '건물 일괄 즉시 강화', message, confirmLabel: '즉시 강화' })) return;
       const result = store.bulkUpgradeBuilding(selectedBuilding);
       if (!result.ok) { toast.show('재화 또는 건설 상태가 변경되어 실행하지 못했습니다.'); return; }
       toast.show(`${BUILDING_META[selectedBuilding].name} Lv.${result.from} → Lv.${result.to} · ${result.count}회 즉시 강화`);

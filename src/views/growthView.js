@@ -2,8 +2,9 @@ import { $ } from '../dom/dom.js';
 import { confirmAction } from '../dom/confirm.js';
 import { formatUnit } from '../domain/units.js';
 import { heroSdImagePath, weaponImagePath, RARITY_COLOR, rarityLabel, heroRarityOf, heroElementOf, heroRoleOf } from '../domain/heroCatalog.js';
+import { flushPendingDefeat } from './adventureView.js';
 
-const STAR_MULTIPLIER_TEXT = [0, 1, 1.3, 1.7, 2.25, 3, 4];
+const STAR_MULTIPLIER_TEXT = [0, 1, 2, 4, 10, 35, 170]; // GameStore.js STAR_MULTIPLIERS와 값을 맞춘 표시 전용 사본
 const WEAPON_STAR_TEXT = [0, 1.0, 1.1, 1.22, 1.36, 1.52];
 const BOND_STORY = {
   1: '"이 여정에 함께해줘서 고마워요."',
@@ -44,7 +45,7 @@ export function initGrowthView(context) {
     if (action === 'level-up') {
       const result = store.levelUpHero(name);
       if (!result.ok) {
-        if (result.reason === 'cap') toast.show(`레벨 상한은 Lv.${result.cap}입니다(계정 레벨에 연동).`);
+        if (result.reason === 'cap') toast.show(`정령 레벨은 계정 레벨과 연동됩니다 · 지금은 Lv.${formatUnit(result.cap)}까지.`);
         else if (result.reason === 'starPowder') toast.show(`별가루가 ${result.shortfall}개 부족해요.`);
         else toast.show(`골드가 ${formatUnit(result.shortfall)} 부족해요.`);
       } else {
@@ -118,6 +119,7 @@ export function openHeroDetail(name) {
 function closeHeroDetail() {
   $('#heroDetailSheet').classList.remove('open');
   openHeroName = null;
+  if (deps) flushPendingDefeat(deps.store);
 }
 
 function renderHeroDetail() {
@@ -147,14 +149,14 @@ function renderHeroDetail() {
       <div>
         <strong style="font-size:16px">${name}</strong>
         <div style="color:${color};font-size:10px;font-weight:800">${rarityLabel(rarity)} · ${heroElementOf(name)} · ${heroRoleOf(name)}</div>
-        <div style="color:var(--muted);font-size:10px;margin-top:2px">Lv.${hero.level} · ★${hero.star} · 인연 ${hero.bond}단계</div>
+        <div style="color:var(--muted);font-size:10px;margin-top:2px">Lv.${formatUnit(hero.level)} · ★${hero.star} · 인연 ${hero.bond}단계</div>
       </div>
     </div>
 
     <div class="hero-detail-section">
       <h4>레벨업</h4>
       <div class="hero-detail-row">
-        <span style="font-size:10px;color:var(--muted)">${hero.level >= levelCost.cap ? `상한 Lv.${levelCost.cap}(계정 레벨 연동)` : `별가루 ${levelCost.starPowder} · 골드 ${formatUnit(levelCost.gold)}`}</span>
+        <span style="font-size:10px;color:var(--muted)">${hero.level >= levelCost.cap ? `계정 레벨과 연동 · 지금은 Lv.${formatUnit(levelCost.cap)}까지` : `별가루 ${levelCost.starPowder} · 골드 ${formatUnit(levelCost.gold)}`}</span>
         <div class="hero-detail-actions">
           <button data-action="level-up" ${hero.level >= levelCost.cap || store.state.materials.starPowder < levelCost.starPowder || store.state.gold < levelCost.gold ? 'disabled' : ''}>레벨업</button>
           <button class="bulk-action-btn" data-action="level-up-bulk" ${!bulkLevel.ok ? 'disabled' : ''}>최대 ${bulkLevel.count}회</button>
@@ -167,7 +169,7 @@ function renderHeroDetail() {
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${mergeInfo.maxed ? '최대 성급' : `${mergeInfo.next}성 · 조각 ${mergeInfo.pool}/${mergeInfo.cost}${mergeInfo.needOwnShard ? ` · 전용조각 ${mergeInfo.ownShards}/1` : ''}`}</span>
         <div class="hero-detail-actions">
-          <button data-action="merge" ${mergeInfo.maxed || mergeInfo.pool < mergeInfo.cost || (mergeInfo.needOwnShard && mergeInfo.ownShards < 1) ? 'disabled' : ''}>${mergeInfo.maxed ? '완료' : `×${STAR_MULTIPLIER_TEXT[mergeInfo.next].toFixed(2)}`}</button>
+          <button data-action="merge" ${mergeInfo.maxed || mergeInfo.pool < mergeInfo.cost || (mergeInfo.needOwnShard && mergeInfo.ownShards < 1) ? 'disabled' : ''}>${mergeInfo.maxed ? '완료' : `합치기 ×${STAR_MULTIPLIER_TEXT[mergeInfo.next].toFixed(2)}`}</button>
           <button class="bulk-action-btn" data-action="merge-bulk" ${!bulkMerge.ok ? 'disabled' : ''}>★${bulkMerge.from}→${bulkMerge.to}</button>
         </div>
       </div>
@@ -199,7 +201,7 @@ function renderHeroDetail() {
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${hero.weaponStar >= 5 ? '승급 상한' : `도면 ${weaponPromoteCost} 필요 / ${store.state.weaponBlueprint} 보유`}</span>
         <div class="hero-detail-actions">
-          <button data-action="weapon-promote" ${hero.weaponStar >= 5 || store.state.weaponBlueprint < weaponPromoteCost ? 'disabled' : ''}>승급</button>
+          <button data-action="weapon-promote" ${hero.weaponStar >= 5 || store.state.weaponBlueprint < weaponPromoteCost ? 'disabled' : ''}>${hero.weaponStar >= 5 ? '완료' : `승급 ×${WEAPON_STAR_TEXT[hero.weaponStar + 1].toFixed(2)}`}</button>
           <button class="bulk-action-btn" data-action="weapon-promote-bulk" ${!bulkPromote.ok ? 'disabled' : ''}>★${bulkPromote.from}→${bulkPromote.to}</button>
         </div>
       </div>
@@ -222,7 +224,7 @@ export function refreshGrowthView(store) {
     const color = RARITY_COLOR[heroRarityOf(name)];
     return `<div class="growth-item" data-name="${name}">
       <img src="${heroSdImagePath(name)}" alt="${name}" style="border:1px solid ${color}">
-      <div><strong>${name}</strong><span>Lv.${hero.level} · ★${hero.star} · 전투력 ${Math.round(heroPower(store, name) * 100) / 100}</span></div>
+      <div><strong>${name}</strong><span>Lv.${formatUnit(hero.level)} · ★${hero.star} · 전투력 ${Math.round(heroPower(store, name) * 100) / 100}</span></div>
     </div>`;
   }).join('') || '<p style="color:var(--muted);font-size:11px;margin-top:10px">아직 보유한 정령이 없습니다. 소환 탭에서 정령을 얻어보세요.</p>';
 

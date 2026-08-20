@@ -1,7 +1,8 @@
 import { $ } from '../dom/dom.js';
 
-export function initLabyrinthView({ store, toast, onChange }) {
+export function initLabyrinthView({ store, toast, onChange, onNavigateSegment }) {
   $('#labyrinthPanel').addEventListener('click', event => {
+    if (event.target.closest('button[data-labyrinth-return]')) { onNavigateSegment('adventure', 'path'); return; }
     if (event.target.closest('button[data-labyrinth-start]')) {
       const result = store.startLabyrinth();
       if (!result.ok) { toast.show(result.reason === 'done' ? '이번 주는 이미 도전했어요.' : '아직 해금되지 않았어요.'); return; }
@@ -9,30 +10,31 @@ export function initLabyrinthView({ store, toast, onChange }) {
       onChange();
       return;
     }
+    if (event.target.closest('button[data-labyrinth-bank]')) {
+      const result = store.bankLabyrinthProgress();
+      if (!result.ok) return;
+      toast.show(`${result.room}방까지 클리어 · 별가루 +${result.reward.starPowder} 획득하고 종료했어요.`);
+      onChange();
+      return;
+    }
     if (event.target.closest('button[data-labyrinth-advance]')) {
-      openBuffChoice(store, toast, onChange);
+      openBuffChoice(store, toast, onChange, onNavigateSegment);
     }
   });
 
   $('#labyrinthBuffChoices').addEventListener('click', event => {
     const btn = event.target.closest('button[data-buff]');
     if (!btn) return;
-    const result = store.attemptLabyrinthRoom(btn.dataset.buff);
+    const chosen = btn.dataset.buff || null;
     $('#labyrinthBuffSheet').classList.remove('open');
-    if (!result.ok) return;
-    if (!result.success) {
-      toast.show(`실패 · ${result.room}방까지 도달 · 별가루 +${result.reward.starPowder}`);
-    } else if (result.completed) {
-      toast.show(`완주! 별의 인연 +${result.reward.starBond}`);
-    } else {
-      toast.show(`${result.room}방 클리어`);
-    }
-    store.saveGame();
+    const result = store.startLabyrinthBattle(chosen);
+    if (!result.ok) { toast.show('전투를 시작할 수 없어요.'); return; }
+    onNavigateSegment('adventure', 'path');
     onChange();
   });
 }
 
-function openBuffChoice(store, toast, onChange) {
+function openBuffChoice(store, toast, onChange, onNavigateSegment) {
   const choices = store.labyrinthBuffChoices();
   $('#labyrinthBuffChoices').innerHTML = choices.map(c => `<button data-buff="${c.id}">${c.label}</button>`).join('') +
     `<button data-buff="">버프 없이 진행</button>`;
@@ -45,6 +47,11 @@ export function refreshLabyrinthView(store) {
     panel.innerHTML = '<div class="content-locked">스테이지 40을 클리어하면 꿈의 미궁이 열립니다.</div>';
     return;
   }
+  if (store.subBattle) {
+    const label = store.subBattle.mode === 'tower' ? '별자리 탑' : '꿈의 미궁';
+    panel.innerHTML = `<div class="content-card"><h3>⚔ 전투 진행 중</h3><p>${label} 전투가 진행 중이에요.</p><button data-labyrinth-return>전투로 돌아가기</button></div>`;
+    return;
+  }
   const l = store.state.labyrinth;
   if (!l.active) {
     panel.innerHTML = `
@@ -55,11 +62,15 @@ export function refreshLabyrinthView(store) {
       </div>`;
     return;
   }
+  const forecast = store.labyrinthForecast();
+  const badgeClass = forecast.verdict === '예상 승리' ? 'win' : forecast.verdict === '공격력 부족' ? 'atk' : 'hp';
   panel.innerHTML = `
     <div class="content-card">
       <h3>🌙 ${l.room + 1}번째 방</h3>
       <p>획득한 버프: ${l.buffs.length ? l.buffs.join(', ') : '없음'}</p>
+      <span class="forecast-badge ${badgeClass}">${forecast.verdict}</span>
       <button data-labyrinth-advance>도전</button>
+      ${l.room > 0 ? `<button data-labyrinth-bank class="secondary">여기서 멈추고 보상 받기(별가루 +${l.room * 40})</button>` : ''}
     </div>
   `;
 }

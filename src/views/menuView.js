@@ -1,5 +1,6 @@
 import { $ } from '../dom/dom.js';
 import { heroSdImagePath, RARITY_COLOR, heroRarityOf } from '../domain/heroCatalog.js';
+import { APP_VERSION, PATCH_NOTES } from '../domain/version.js';
 
 let pendingProfileIcon = null; // 편집 중 임시 선택값. null = 기본 아이콘, 문자열이면 그 정령의 SD 초상화.
 
@@ -52,6 +53,15 @@ function missionRow(key, mission, label) {
 }
 
 export function initMenuView({ store, toast, onChange }) {
+  $('#appVersionText').textContent = `v${APP_VERSION}`;
+  $('#patchNotesList').innerHTML = PATCH_NOTES.map(entry => `
+    <div class="patch-note-entry">
+      <div class="patch-note-head"><strong>v${entry.version}</strong><span>${entry.date}</span></div>
+      ${entry.title ? `<div style="font-size:11px;font-weight:800;margin-bottom:6px">${entry.title}</div>` : ''}
+      <ul>${entry.items.map(item => `<li>${item}</li>`).join('')}</ul>
+    </div>
+  `).join('') || '<p style="color:var(--muted);font-size:11px">기록된 패치 노트가 없습니다.</p>';
+
   $('#openProfileEditBtn').addEventListener('click', () => openProfileEdit(store));
 
   $('#profileIconGrid').addEventListener('click', event => {
@@ -87,7 +97,7 @@ export function initMenuView({ store, toast, onChange }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'starlight-save-v4.json';
+    link.download = 'starlight-save-v5.json';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast.show('저장 파일을 내보냈습니다.');

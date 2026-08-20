@@ -4,11 +4,11 @@ import { formatUnit } from './domain/units.js';
 import { heroSdImagePath } from './domain/heroCatalog.js';
 import { $, $$, createToast } from './dom/dom.js';
 import { track } from './dom/analytics.js';
-import { initConfirmAction } from './dom/confirm.js';
+import { initConfirmAction, confirmAction } from './dom/confirm.js';
 
 import { initVillageView, refreshVillageView } from './views/villageView.js';
 import { initSpiritsView, refreshSpiritsView } from './views/spiritsView.js';
-import { initAdventureView, refreshAdventureView, tickAdventure, showAdventureView, resetAdventureView } from './views/adventureView.js';
+import { initAdventureView, refreshAdventureView, tickAdventure, showAdventureView, resetAdventureView, flushPendingDefeat } from './views/adventureView.js';
 import { initBountyView, refreshBountyView } from './views/bountyView.js';
 import { initTowerView, refreshTowerView } from './views/towerView.js';
 import { initLabyrinthView, refreshLabyrinthView } from './views/labyrinthView.js';
@@ -21,6 +21,18 @@ const store = new GameStore();
 const audio = new SoundManager();
 const toast = createToast();
 initConfirmAction();
+
+let lastTutorialState = { step: store.state.tutorial.step, completed: store.state.tutorial.completed };
+function checkTutorialProgress() {
+  const t = store.state.tutorial;
+  if (t.completed === lastTutorialState.completed && t.step === lastTutorialState.step) return;
+  if (!lastTutorialState.completed && !t.completed && lastTutorialState.step === 1 && t.step === 2) {
+    toast.show('첫 정령을 얻었어요! 이제 파티를 편성해보세요.');
+  } else if (!lastTutorialState.completed && t.completed) {
+    toast.show('파티 편성 완료! 사냥을 시작합니다.');
+  }
+  lastTutorialState = { step: t.step, completed: t.completed };
+}
 
 function refreshAll() {
   $('#goldCount').textContent = formatUnit(store.state.gold);
@@ -39,6 +51,7 @@ function refreshAll() {
   refreshSummonView(store);
   refreshMenuView(store);
   refreshIdleSystemsView(store);
+  checkTutorialProgress(); // 신규, 함수 맨 끝
 }
 
 function navigateTo(pageName, segment = null) {
@@ -67,10 +80,10 @@ const cinematic = initCinematic({ store, audio, toast, onDone: refreshAll });
 
 initVillageView({ store, toast, onChange: refreshAll });
 initSpiritsView({ store, toast, onChange: refreshAll });
-initAdventureView({ store, toast, onChange: refreshAll, onNavigateToParty: goToSpiritsParty });
+initAdventureView({ store, toast, onChange: refreshAll, onNavigateToParty: goToSpiritsParty, onNavigateToSummon: () => navigateTo('summon') });
 initBountyView({ store, toast, onChange: refreshAll });
-initTowerView({ store, toast, onChange: refreshAll });
-initLabyrinthView({ store, toast, onChange: refreshAll });
+initTowerView({ store, toast, onChange: refreshAll, onNavigateSegment: navigateTo });
+initLabyrinthView({ store, toast, onChange: refreshAll, onNavigateSegment: navigateTo });
 initSummonView({ store, toast, onPull: (count, bannerType) => cinematic.pull(count, bannerType) });
 initMenuView({ store, toast, onChange: refreshAll });
 initIdleSystemsView({ store, toast, onChange: refreshAll, onNavigate: navigateTo });
@@ -87,9 +100,10 @@ $$('.nav-btn').forEach(btn => btn.addEventListener('click', () => {
 // -------------------------------------------------------------- 바텀시트
 const sheets = $$('.sheet-backdrop');
 function openSheet(sheet) { sheet.classList.add('open'); }
-function closeSheets() { sheets.forEach(sheet => sheet.classList.remove('open')); }
+function closeSheets() { sheets.forEach(sheet => sheet.classList.remove('open')); flushPendingDefeat(store); }
 $('#rateBtn').addEventListener('click', () => openSheet($('#rateSheet')));
 $('#settingsBtn').addEventListener('click', () => openSheet($('#settingsSheet')));
+$('#patchNotesBtn').addEventListener('click', () => openSheet($('#patchNotesSheet')));
 $$('.sheet-close').forEach(btn => btn.addEventListener('click', closeSheets));
 sheets.forEach(sheet => sheet.addEventListener('click', e => { if (e.target === sheet) closeSheets(); }));
 
@@ -109,12 +123,25 @@ $$('#textSizeControl .seg-btn').forEach(btn => btn.addEventListener('click', () 
   document.documentElement.dataset.textSize = btn.dataset.size;
   store.saveGame();
 }));
-$('#resetBtn').addEventListener('click', () => {
+$('#autoSkipToggle').addEventListener('click', e => {
+  const next = !store.state.settings.autoSkipCinematic;
+  store.setAutoSkipCinematic(next);
+  e.currentTarget.classList.toggle('on', next);
+  e.currentTarget.setAttribute('aria-label', `연출 자동 건너뛰기 ${next ? '켜짐' : '꺼짐'}`);
+  store.saveGame();
+});
+$('#resetBtn').addEventListener('click', async () => {
+  const ok = await confirmAction({
+    title: '데이터 초기화',
+    message: '보유한 골드·보석·정령·파티 편성이 모두 삭제되고 처음부터 다시 시작합니다. 이 작업은 되돌릴 수 없어요. 계속할까요?',
+    confirmLabel: '초기화하기'
+  });
+  if (!ok) return;
   store.resetGame();
   resetAdventureView(store);
   closeSheets();
   refreshAll();
-  toast.show('체험 데이터가 초기화됐어요. 10회 소환으로 전설을 확인해 보세요!');
+  toast.show('초기화 완료! 소환 탭에서 정령을 얻고 파티를 편성해보세요.');
 });
 
 // -------------------------------------------------------------- 저장/전투
@@ -128,19 +155,30 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+const BATTLE_TICK_MS = { 1: 800, 2: 400, 3: 267 };
 let battleTimer = null;
 function startBattleTimer() {
   if (battleTimer) clearInterval(battleTimer);
-  const interval = store.state.battleSpeed === 2 ? 400 : 800;
-  battleTimer = setInterval(() => { if (!document.hidden) tickAdventure(store, toast); }, interval);
+  const interval = BATTLE_TICK_MS[store.state.battleSpeed] ?? 800;
+  battleTimer = setInterval(() => {
+    if (!document.hidden) {
+      const outcome = tickAdventure(store, toast);
+      if (outcome?.subBattleResolvedTo) navigateTo('adventure', outcome.subBattleResolvedTo);
+    }
+  }, interval);
 }
 window.addEventListener('battle-speed-changed', startBattleTimer);
 
 // 초기 텍스트 크기 반영(저장된 설정 복원)
 document.documentElement.dataset.textSize = store.state.settings.textSize;
 $$('#textSizeControl .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.size === store.state.settings.textSize));
+$('#autoSkipToggle').classList.toggle('on', store.state.settings.autoSkipCinematic);
+$('#autoSkipToggle').setAttribute('aria-label', `연출 자동 건너뛰기 ${store.state.settings.autoSkipCinematic ? '켜짐' : '꺼짐'}`);
 
 refreshAll();
 refreshIdleSystemsView(store, { present: true });
 startBattleTimer();
+if (!store.state.tutorial.completed && store.state.tutorial.step === 1) {
+  toast.show('🌟 별빛 정령 키우기에 오신 걸 환영합니다! 소환 탭에서 첫 정령을 만나보세요.');
+}
 setInterval(() => { if (!document.hidden) { store.checkResets(); store.saveGame(); refreshAll(); } }, 5000);

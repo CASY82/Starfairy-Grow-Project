@@ -1,6 +1,8 @@
 import { $ } from '../dom/dom.js';
 import { heroSdImagePath, RARITY_COLOR, heroRarityOf } from '../domain/heroCatalog.js';
 
+const SLOT_DEFAULT_ROW = ['front', 'front', 'back', 'back', 'back']; // §3-3, GameStore.js와 동일
+
 let pickerTargetSlot = null;
 
 export function initPartyView({ store, toast, onChange }) {
@@ -83,19 +85,20 @@ function slotMarkup(store, slot, index) {
 }
 
 export function refreshPartyView(store) {
-  const party = store.state.party;
-  const front = party.map((s, i) => ({ s, i })).filter(x => x.s.row === 'front');
-  const back = party.map((s, i) => ({ s, i })).filter(x => x.s.row === 'back');
+  const party = store.state.party; // 길이 5 고정, 원소는 {name,row} 또는 null
+  const indexed = party.map((slot, i) => ({ slot, i, row: slot ? slot.row : SLOT_DEFAULT_ROW[i] })); // 변경
+  const front = indexed.filter(x => x.row === 'front'); // 변경: .row 직접 필터 → 파생 row 필터
+  const back = indexed.filter(x => x.row === 'back'); // 변경
 
   $('#partyPanel').innerHTML = `
     <div class="party-rows">
       <div>
         <div class="party-row-label">전열 (2)</div>
-        <div class="party-slots front">${front.map(x => slotMarkup(store, x.s, x.i)).join('')}</div>
+        <div class="party-slots front">${front.map(x => slotMarkup(store, x.slot, x.i)).join('')}</div>
       </div>
       <div>
         <div class="party-row-label">후열 (3)</div>
-        <div class="party-slots back">${back.map(x => slotMarkup(store, x.s, x.i)).join('')}</div>
+        <div class="party-slots back">${back.map(x => slotMarkup(store, x.slot, x.i)).join('')}</div>
       </div>
     </div>
     <p style="margin:10px 2px 0;color:var(--muted);font-size:9.5px">슬롯을 탭해서 정령을 배치하고, 배치된 슬롯을 다시 탭하면 전열/후열이 바뀝니다. 동일 정령은 최대 2명까지 편성할 수 있어요.</p>

@@ -45,4 +45,16 @@ export function refreshSummonView(store) {
   } else {
     infoText.textContent = '픽업 획득 확률 50% · 빗나갈 시 다음 확정';
   }
+  $$('.summon-btn[data-pull]').forEach(btn => {
+    const count = Number(btn.dataset.pull);
+    const affordable = store.canAffordPull(count);
+    btn.disabled = !affordable;
+    btn.classList.toggle('disabled', !affordable);
+  });
+  $$('[data-bond-pull]').forEach(btn => {
+    const count = Number(btn.dataset.bondPull);
+    const affordable = store.canAffordBondPull(count);
+    btn.disabled = !affordable;
+    btn.classList.toggle('disabled', !affordable);
+  });
 }

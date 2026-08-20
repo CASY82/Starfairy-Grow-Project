@@ -3,6 +3,10 @@ import { formatUnit } from '../domain/units.js';
 import { STAGE_NAMES, chapterBackgroundPath, enemyImagePath, heroSdImagePath, heroRoleOf } from '../domain/heroCatalog.js';
 import { battleVfx } from './battleVfx.js';
 
+const ULT_HIT_BASE_MS = { 1: 480, 2: 320, 3: 220 };
+const LUNGE_REMOVE_MS = { 1: 340, 2: 240, 3: 170 };
+const BASIC_HIT_MS = { 1: 180, 2: 110, 3: 80 };
+
 let travelling = false;
 let travelTimers = [];
 let presentationTimers = [];
@@ -80,7 +84,7 @@ function renderParty(store) {
   const unitHtml = (slot, index) => `
     <div class="unit" data-slot-index="${index}" title="${slot.name}"><img src="${heroSdImagePath(slot.name)}" alt="${slot.name}"></div>
   `;
-  const indexed = store.state.party.map((slot, index) => ({ slot, index }));
+  const indexed = store.state.party.map((slot, index) => ({ slot, index })).filter(x => x.slot); // 변경: .filter(x => x.slot) 추가
   const back = indexed.filter(s => s.slot.row !== 'front');
   const front = indexed.filter(s => s.slot.row === 'front');
   $('#partyRow').innerHTML = `
@@ -168,7 +172,7 @@ function queueUltimateCast(store, fired, queueIndex = 0) {
     queueIndex
   });
 
-  const hitDelay = (store.state.battleSpeed === 2 ? 320 : 480) + queueIndex * 120;
+  const hitDelay = (ULT_HIT_BASE_MS[store.state.battleSpeed] ?? ULT_HIT_BASE_MS[1]) + queueIndex * 120;
   presentationTimeout(() => spawnDamage(fired.bonus, false, true), hitDelay);
 }
 
@@ -180,7 +184,7 @@ function applyUltimateResult(store, toast, result) {
   }
 }
 
-export function initAdventureView({ store, toast, onChange, onNavigateToParty }) {
+export function initAdventureView({ store, toast, onChange, onNavigateToParty, onNavigateToSummon }) {
   renderParty(store);
   renderUltSkillBar(store);
   updateEnemyDisplay(store);
@@ -223,6 +227,12 @@ export function initAdventureView({ store, toast, onChange, onNavigateToParty })
 
   $('#gotoParty').addEventListener('click', () => onNavigateToParty());
 
+  $('#noPartyPanel').addEventListener('click', e => {
+    if (e.target.id !== 'noPartyCta') return;
+    if (e.target.dataset.action === 'summon') onNavigateToSummon();
+    else onNavigateToParty();
+  });
+
   $('#ultSkillBar').addEventListener('click', e => {
     const slot = e.target.closest('.ult-slot');
     if (!slot) return;
@@ -236,19 +246,33 @@ export function initAdventureView({ store, toast, onChange, onNavigateToParty })
   $('#ultimateAutoBtn').addEventListener('click', () => { store.setUltimateMode('auto'); onChange(); });
   $('#ultimateManualBtn').addEventListener('click', () => { store.setUltimateMode('manual'); onChange(); });
 
-  $('#speedToggleBtn').addEventListener('click', () => {
-    const next = store.state.battleSpeed === 2 ? 1 : 2;
+  $('#speedToggleGroup').addEventListener('click', e => {
+    const btn = e.target.closest('.speed-btn');
+    if (!btn) return;
+    const next = Number(btn.dataset.speed);
+    if (next === store.state.battleSpeed) return;
     const result = store.setBattleSpeed(next);
-    if (!result.ok) { toast.show('30단계를 먼저 클리어해야 2배속이 열립니다.'); return; }
+    if (!result.ok) {
+      toast.show(next === 3 ? '스테이지 50을 먼저 클리어해야 3배속이 열립니다.' : '스테이지 10을 먼저 클리어해야 2배속이 열립니다.');
+      return;
+    }
     toast.show(`${next}배속으로 전환했습니다.`);
     onChange();
     window.dispatchEvent(new CustomEvent('battle-speed-changed'));
   });
 
-  $('#hardModeBtn').addEventListener('click', () => {
-    const result = store.toggleHardMode();
-    if (!result.ok) { toast.show('50단계를 먼저 클리어해야 하드 모드가 열립니다.'); return; }
-    toast.show(result.active ? '하드 모드 활성화 · 적 체력 ×1.5, 보상 ×1.3' : '하드 모드를 해제했습니다.');
+  $('#difficultyTierGroup').addEventListener('click', e => {
+    const btn = e.target.closest('.tier-btn');
+    if (!btn) return;
+    const tier = btn.dataset.tier;
+    if (tier === store.state.difficultyTier) return;
+    const result = store.setDifficultyTier(tier);
+    if (!result.ok) {
+      toast.show(result.reason === 'locked' ? '이전 난이도를 50단계까지 클리어해야 열립니다.' : '전환할 수 없습니다.');
+      return;
+    }
+    const label = { easy: '쉬움', normal: '보통', hard: '어려움' }[tier];
+    toast.show(`난이도 ${label}(으)로 전환했습니다.`);
     onChange();
   });
 
@@ -307,22 +331,58 @@ function spawnDamage(damage, critical, ultimate = false) {
 }
 
 function showDefeatOverlay(defeatInfo) {
+  const mode = defeatInfo.mode || 'stage';
+  const dropLine = mode === 'stage'
+    ? (defeatInfo.stageDropped ? `<p style="color:var(--cyan);font-size:11px;margin-top:8px">STAGE ${defeatInfo.stage}로 후퇴 · 여기서 자금을 모아 다시 도전하세요</p>` : '')
+    : mode === 'tower'
+      ? `<p style="color:var(--cyan);font-size:11px;margin-top:8px">${defeatInfo.floor}층에서 바로 다시 도전할 수 있어요 · 소모되는 자원이 없습니다</p>`
+      : `<p style="color:var(--cyan);font-size:11px;margin-top:8px">${defeatInfo.room}번째 방까지 도달 · 별가루 +${defeatInfo.reward.starPowder} 획득 · 이번 주 미궁은 종료되었습니다</p>`;
   $('#defeatContent').innerHTML = `
     <p style="font-size:13px">생존 시간 <strong>${defeatInfo.survivedSec}초</strong></p>
     <p style="color:var(--muted);font-size:11px;margin-top:4px">${defeatInfo.reasonText}</p>
-    ${defeatInfo.stageDropped ? `<p style="color:var(--cyan);font-size:11px;margin-top:8px">STAGE ${defeatInfo.stage}로 후퇴 · 여기서 자금을 모아 다시 도전하세요</p>` : ''}
-    ${defeatInfo.consecutiveLosses >= 3 ? `<p style="color:var(--gold);font-size:10px;margin-top:8px">연속 ${defeatInfo.consecutiveLosses}회 실패 · 다음 도전에 파티 체력 보정이 적용됩니다.</p>` : ''}
+    ${dropLine}
+    ${mode === 'stage' && defeatInfo.consecutiveLosses >= 3 ? `<p style="color:var(--gold);font-size:10px;margin-top:8px">연속 ${defeatInfo.consecutiveLosses}회 실패 · 다음 도전에 파티 체력 보정이 적용됩니다.</p>` : ''}
   `;
   $('#defeatOverlay').classList.add('open');
 }
 
+// 다른 오버레이(가챠 연출, 결과 화면, 바텀시트)가 열려 있는 동안 패배 화면이 그 위에
+// 겹쳐 뜨는 것을 막기 위한 큐. 막혀 있으면 최신 패배 정보만 보관했다가, 막는 화면이
+// 닫히는 즉시(또는 늦어도 다음 전투 틱에) 띄운다.
+let pendingDefeatInfo = null;
+
+function isDefeatBlocked(store) {
+  return !!store.busy
+    || !!document.querySelector('.sheet-backdrop.open')
+    || $('#resultsOverlay').classList.contains('open');
+}
+
+function presentDefeat(store, defeatInfo) {
+  if (isDefeatBlocked(store)) { pendingDefeatInfo = defeatInfo; return; }
+  showDefeatOverlay(defeatInfo);
+}
+
+/** 가챠 연출/바텀시트가 닫힐 때 호출해 대기 중인 패배 화면을 바로 띄운다.
+ * (호출을 놓쳐도 tickAdventure가 매 틱마다 같은 검사를 반복하므로 최악의 경우
+ * 다음 전투 틱—0.8초, 2배속이면 0.4초—안에는 항상 표시된다.) */
+export function flushPendingDefeat(store) {
+  if (!pendingDefeatInfo || isDefeatBlocked(store)) return;
+  const info = pendingDefeatInfo;
+  pendingDefeatInfo = null;
+  showDefeatOverlay(info);
+}
+
 /** 0.8초(또는 2배속 시 0.4초) 전투 틱. app.js가 호출한다. */
 export function tickAdventure(store, toast) {
+  flushPendingDefeat(store);
+  if (!store.hasFormedParty()) { refreshAdventureView(store); return; } // 신규(§3-2)
+  if (store.subBattle) return tickSubBattle(store, toast);
   if (travelling) {
     refreshAdventureView(store);
     return;
   }
   const result = store.performAutoAttack();
+  if (!result) { refreshAdventureView(store); return; } // 방어: 위 게이트를 우회해 도달해도 안전
   const enemySprite = $('#enemySprite');
   const attacker = $(`.unit[data-slot-index="${result.attackerIndex}"]`);
   const attackerName = store.state.party[result.attackerIndex]?.name;
@@ -337,11 +397,11 @@ export function tickAdventure(store, toast) {
       attacker.style.setProperty('--lunge-x', `${Math.max(12, targetX - unitCenterX)}px`);
     }
     if (battleVfx.effectiveQuality() !== 'minimal') attacker.classList.add('attack');
-    presentationTimeout(() => attacker.classList.remove('attack'), store.state.battleSpeed === 2 ? 240 : 340);
+    presentationTimeout(() => attacker.classList.remove('attack'), LUNGE_REMOVE_MS[store.state.battleSpeed] ?? LUNGE_REMOVE_MS[1]);
   }
   battleVfx.playBasicAttack({ heroName: attackerName, attackerElement: attacker, targetElement: enemySprite,
     critical: result.critical, speed: store.state.battleSpeed });
-  const basicHitDelay = battleVfx.effectiveQuality() === 'minimal' ? 80 : store.state.battleSpeed === 2 ? 110 : 180;
+  const basicHitDelay = battleVfx.effectiveQuality() === 'minimal' ? 80 : (BASIC_HIT_MS[store.state.battleSpeed] ?? BASIC_HIT_MS[1]);
   presentationTimeout(() => {
     enemySprite.classList.add('hit');
     presentationTimeout(() => enemySprite.classList.remove('hit'), 180);
@@ -356,11 +416,63 @@ export function tickAdventure(store, toast) {
       if (result.killResult.looped) toast.show('별의 길 50 스테이지 클리어! 1단계부터 반복합니다.');
     }
   } else if (result.defeated) {
-    showDefeatOverlay(result.defeatInfo);
+    presentDefeat(store, result.defeatInfo);
   } else {
     maybeShowUltTapHint(store, toast);
   }
   refreshAdventureView(store);
+}
+
+function tickSubBattle(store, toast) {
+  const result = store.tickSubBattle();
+  if (!result) { refreshAdventureView(store); return undefined; }
+  const enemySprite = $('#enemySprite');
+  const attacker = $(`.unit[data-slot-index="${result.attackerIndex}"]`);
+  const attackerName = store.state.party[result.attackerIndex]?.name;
+  const isMeleeAttacker = ['수호', '전사'].includes(heroRoleOf(attackerName));
+  if (attacker && isMeleeAttacker) {
+    const scene = $('#battleScene');
+    if (scene.offsetParent !== null) {
+      const unitRect = attacker.getBoundingClientRect();
+      const enemyRect = enemySprite.getBoundingClientRect();
+      const targetX = enemyRect.left + enemyRect.width * 0.32;
+      const unitCenterX = unitRect.left + unitRect.width / 2;
+      attacker.style.setProperty('--lunge-x', `${Math.max(12, targetX - unitCenterX)}px`);
+    }
+    if (battleVfx.effectiveQuality() !== 'minimal') attacker.classList.add('attack');
+    presentationTimeout(() => attacker.classList.remove('attack'), LUNGE_REMOVE_MS[store.state.battleSpeed] ?? LUNGE_REMOVE_MS[1]);
+  }
+  battleVfx.playBasicAttack({ heroName: attackerName, attackerElement: attacker, targetElement: enemySprite,
+    critical: result.critical, speed: store.state.battleSpeed });
+  const basicHitDelay = battleVfx.effectiveQuality() === 'minimal' ? 80 : (BASIC_HIT_MS[store.state.battleSpeed] ?? BASIC_HIT_MS[1]);
+  presentationTimeout(() => {
+    enemySprite.classList.add('hit');
+    presentationTimeout(() => enemySprite.classList.remove('hit'), 180);
+    spawnDamage(result.damage, result.critical);
+  }, basicHitDelay);
+  result.ultimatesFired.forEach((fired, index) => queueUltimateCast(store, fired, index));
+
+  if (result.resolved) {
+    const r = result.resolveResult;
+    if (toast) {
+      if (r.mode === 'tower') {
+        toast.show(r.reward ? `${r.clearedFloor}층 클리어! 기억의 별 +${r.reward.memoryStars} · 무기 도면 +${r.reward.weaponBlueprint}` : `${r.clearedFloor}층 클리어!`);
+      } else if (r.completed) {
+        toast.show(`완주! 별의 인연 +${r.reward.starBond}`);
+      } else {
+        toast.show(`${r.room}방 클리어 · 계속 도전할 수 있어요`);
+      }
+    }
+    refreshAdventureView(store);
+    return { subBattleResolvedTo: r.mode };
+  }
+  if (result.defeated) {
+    presentDefeat(store, result.defeatInfo);
+    refreshAdventureView(store);
+    return { subBattleResolvedTo: result.defeatInfo.mode };
+  }
+  refreshAdventureView(store);
+  return undefined;
 }
 
 function renderRecommendTable(store) {
@@ -388,10 +500,83 @@ function renderRecommendTable(store) {
   `;
 }
 
+function subBattleLabel(sub) {
+  return sub.mode === 'tower'
+    ? { title: '별자리 탑', stageText: `${sub.floor}층`, name: `별자리 탑 ${sub.floor}층` }
+    : { title: '꿈의 미궁', stageText: `${sub.room + 1}번째 방`, name: `꿈의 미궁 ${sub.room + 1}번째 방` };
+}
+function subBattleArtStage(sub) {
+  // 전용 아트가 없으므로(CLAUDE.md: 새 몬스터 아트 미제작) 기존 1~50 챕터 아트를 재사용한다.
+  // 탑은 50스테이지 주기로 순환, 미궁은 5개 방을 기존 보스 스테이지(10/20/30/40/50) 아트에
+  // 매핑해 "5개의 기억 속 보스"라는 컨셉과 맞춘다.
+  return sub.mode === 'tower' ? (((sub.floor - 1) % 50) + 1) : (sub.room + 1) * 10;
+}
+function renderSubBattleHud(store) {
+  const sub = store.subBattle;
+  const label = subBattleLabel(sub);
+  const artStage = subBattleArtStage(sub);
+  $('#stageRowLabel').textContent = label.title;
+  $('#stagePrefixLabel').textContent = '';
+  $('#battleStage').textContent = label.stageText;
+  $('#enemyName').textContent = label.name;
+  const enemySprite = $('#enemySprite');
+  enemySprite.classList.toggle('boss', sub.mode === 'labyrinth');
+  enemySprite.innerHTML = `<img src="${enemyImagePath(artStage)}" alt="${label.name}" draggable="false">`;
+  $('#battleScene').style.setProperty('--battle-bg', `url('${chapterBackgroundPath(artStage)}')`);
+  $('#battleScene').style.setProperty('--battle-offset', '0px');
+  $('#forecastBadge').innerHTML = '';
+  $('#enemyHp').textContent = formatUnit(sub.enemyHp > 0n ? sub.enemyHp : 0n);
+  $('#enemyMaxHp').textContent = formatUnit(sub.enemyMaxHp);
+  const hpRatio = sub.enemyHp <= 0n ? 0 : Number((sub.enemyHp * 10000n) / sub.enemyMaxHp) / 100;
+  $('#enemyHpFill').style.width = `${Math.max(0, Math.min(100, hpRatio))}%`;
+  const partyHp = sub.partyHp > 0n ? sub.partyHp : 0n;
+  $('#partyHpText').textContent = `${formatUnit(partyHp)} / ${formatUnit(sub.partyMaxHp)}`;
+  const partyHpRatio = sub.partyMaxHp > 0n ? Number((partyHp * 10000n) / sub.partyMaxHp) / 100 : 0;
+  $('#partyHpFill').style.width = `${Math.max(0, Math.min(100, partyHpRatio))}%`;
+}
+
+function renderNoPartyState(store) {
+  const t = store.state.tutorial;
+  const ownedCount = Object.keys(store.state.heroes).length;
+  let title, body, ctaLabel, ctaAction;
+  if (!t.completed && t.step === 1) {
+    title = '별빛 정령 키우기에 오신 걸 환영합니다';
+    body = '아직 정령이 없어요. 소환 탭에서 첫 정령을 만나보세요.';
+    ctaLabel = '소환하러 가기'; ctaAction = 'summon';
+  } else if (!t.completed && t.step === 2) {
+    title = '정령을 얻었어요!';
+    body = '이제 파티를 편성하면 사냥을 시작할 수 있어요.';
+    ctaLabel = '파티 편성하러 가기'; ctaAction = 'party';
+  } else {
+    title = '편성된 정령이 없습니다';
+    body = ownedCount > 0
+      ? '정령 탭에서 파티를 편성해야 전투를 진행할 수 있어요.'
+      : '정령 탭에서 파티를 편성해야 전투를 진행할 수 있어요. 소환 탭에서 정령을 먼저 얻어보세요.';
+    ctaLabel = '파티 편성하러 가기'; ctaAction = 'party';
+  }
+  $('#noPartyPanel').innerHTML = `
+    <div class="content-card">
+      <h3>${title}</h3>
+      <p>${body}</p>
+      <button type="button" id="noPartyCta" data-action="${ctaAction}">${ctaLabel}</button>
+    </div>`;
+}
+
 export function refreshAdventureView(store) {
+  const page = document.querySelector('[data-page="adventure"]');
+  const formed = store.hasFormedParty();
+  page?.classList.toggle('no-party-mode', !formed); // 신규
+  if (!formed) { renderNoPartyState(store); return; } // 신규 — sub-battle-mode 분기보다 먼저 검사
+  const sub = store.subBattle;
+  page?.classList.toggle('sub-battle-mode', !!sub);
+  if (sub) { renderSubBattleHud(store); return; }
   const b = store.battle;
+  // renderSubBattleHud()가 이 두 라벨을 "별자리 탑"/""로 덮어쓰므로, 서브 배틀이 끝나고 메인
+  // 스테이지로 돌아온 뒤에는(정상 경로) 매번 기본값으로 되돌려야 한다.
+  $('#stageRowLabel').textContent = '별의 길 · 50 STAGES';
+  $('#stagePrefixLabel').textContent = 'STAGE ';
   $('#battleStage').textContent = `${b.stage} / 50`;
-  $('#userLevel').textContent = store.state.account.level;
+  $('#userLevel').textContent = formatUnit(store.state.account.level);
   $('#enemyHp').textContent = formatUnit(b.enemyHp > 0n ? b.enemyHp : 0n);
   $('#enemyMaxHp').textContent = formatUnit(b.enemyMaxHp);
   $('#attackPower').textContent = formatUnit(store.effectiveAttack());
@@ -421,10 +606,20 @@ export function refreshAdventureView(store) {
   $('#ultimateManualBtn').classList.toggle('active', store.state.ultimateMode === 'manual');
   $('#ultimateAutoBtn').disabled = !store.state.unlocked.ultimate;
   $('#ultimateManualBtn').disabled = !store.state.unlocked.ultimate;
-  $('#speedToggleBtn').classList.toggle('active', store.state.battleSpeed === 2);
-  $('#speedToggleBtn').classList.toggle('locked', !store.state.unlocked.speed2x);
-  $('#hardModeBtn').classList.toggle('active', store.state.hardModeActive);
-  $('#hardModeBtn').classList.toggle('locked', !store.state.unlocked.hardMode);
+  $$('#speedToggleGroup .speed-btn').forEach(btn => {
+    const speed = Number(btn.dataset.speed);
+    btn.classList.toggle('active', speed === store.state.battleSpeed);
+    const locked = speed === 2 ? !store.state.unlocked.speed2x : speed === 3 ? !store.state.unlocked.speed3x : false;
+    btn.classList.toggle('locked', locked);
+  });
+  const activeTier = store.state.difficultyTier;
+  $$('#difficultyTierGroup .tier-btn').forEach(btn => {
+    const tier = btn.dataset.tier;
+    btn.classList.toggle('active', tier === activeTier);
+    const locked = tier === 'normal' ? !store.state.unlocked.normalTier
+      : tier === 'hard' ? !store.state.unlocked.hardTier : false;
+    btn.classList.toggle('locked', locked);
+  });
 
   const forecast = store.battleForecast();
   const badgeClass = forecast.verdict === '예상 승리' ? 'win' : forecast.verdict === '공격력 부족' ? 'atk' : 'hp';

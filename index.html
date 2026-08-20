@@ -196,6 +196,14 @@
     .system-card p { margin: 0 0 11px; color: var(--muted); font-size: 10px; line-height: 1.55; }
     .system-actions { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
     .system-actions button { min-height: 44px; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: #302b5a; cursor: pointer; font-size: 9px; font-weight: 850; }
+    #patchNotesBtn { min-height: 44px; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: #302b5a; color: inherit; cursor: pointer; font-size: 10.5px; font-weight: 850; }
+    .patch-note-entry { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .patch-note-entry:last-child { border-bottom: none; }
+    .patch-note-entry .patch-note-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+    .patch-note-entry .patch-note-head strong { font-size: 13px; }
+    .patch-note-entry .patch-note-head span { color: var(--muted); font-size: 10px; }
+    .patch-note-entry ul { margin: 0; padding-left: 16px; display: grid; gap: 5px; }
+    .patch-note-entry li { font-size: 11px; line-height: 1.5; color: var(--text); }
     .weapon-card { margin-top: 12px; padding: 13px; border: 1px solid rgba(167,121,255,.35); border-radius: 15px; background: rgba(46,38,88,.55); }
     .weapon-visual { float: right; width: 74px; height: 74px; margin-left: 10px; object-fit: contain; border-radius: 14px; background: rgba(255,255,255,.05); }
     .weapon-card strong, .weapon-card span { display: block; }
@@ -447,7 +455,7 @@
     .info-links { display: flex; justify-content: space-between; color: #aaa8c5; font-size: 10px; }
     .text-link { padding: 2px 0; border: 0; background: transparent; color: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 
-    .summon-actions { display: grid; grid-template-columns: .86fr 1.14fr; gap: 9px; margin-top: 10px; }
+    .summon-actions { display: grid; grid-template-columns: .74fr .92fr 1.02fr; gap: 7px; margin-top: 10px; }
     .summon-btn {
       position: relative;
       min-height: 58px;
@@ -469,6 +477,17 @@
       animation: btn-shine 3.3s ease-in-out infinite;
     }
     @keyframes btn-shine { 0%, 52% { transform: translateX(-70%) rotate(20deg); } 85%, 100% { transform: translateX(70%) rotate(20deg); } }
+    .summon-btn.hundred { background: linear-gradient(145deg, #ffb84d, #e08a2e 62%, #b5661a); }
+    .summon-btn.hundred::before {
+      content: "";
+      position: absolute;
+      inset: -80% -30%;
+      transform: rotate(20deg);
+      background: linear-gradient(90deg, transparent 35%, rgba(255,255,255,.3), transparent 65%);
+      animation: btn-shine 2.6s ease-in-out infinite;
+    }
+    .summon-btn:disabled, .summon-btn.disabled,
+    .exchange-row button:disabled, .exchange-row button.disabled { opacity: .38; filter: grayscale(.5); cursor: default; pointer-events: none; }
     .summon-btn strong { position: relative; display: block; font-size: 14px; }
     .summon-btn span { position: relative; display: block; margin-top: 4px; color: rgba(255,255,255,.78); font-size: 10px; }
     .gem-mini { color: #9cf4ff; }
@@ -816,6 +835,14 @@
     .results-title { margin-bottom: 15px; text-align: center; }
     .results-title small { color: var(--violet); font-weight: 900; letter-spacing: .17em; }
     .results-title h2 { margin: 4px 0 0; font-size: 27px; letter-spacing: -.045em; }
+    .result-summary { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .result-summary:empty { display: none; margin-bottom: 0; }
+    .summary-chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 10px; font-weight: 800; background: #241f45; }
+    .summary-chip.legendary { border-color: rgba(255,77,95,.7); color: #ff6575; }
+    .summary-chip.epic { border-color: rgba(167,121,255,.6); color: var(--epic); }
+    .summary-chip.rare { border-color: rgba(255,216,77,.55); color: var(--rare); }
+    .summary-chip.magic { border-color: rgba(79,168,255,.5); color: var(--magic); }
+    .summary-chip.common { border-color: rgba(148,153,168,.4); color: var(--common); }
     .result-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
     .result-item {
       position: relative;
@@ -971,12 +998,22 @@
     .forecast-badge.win { background: rgba(101,239,175,.15); color: #79ebbb; }
     .forecast-badge.atk { background: rgba(255,77,95,.15); color: #ff6575; }
     .forecast-badge.hp { background: rgba(255,180,80,.15); color: #ffb450; }
+    .sub-battle-mode #upgradePanel, .sub-battle-mode #strategyPanel, .sub-battle-mode #battleTogglesPanel, .sub-battle-mode #forecastBadge { display: none; }
+    #noPartyPanel { display: none; }
+    .no-party-mode #battleArena, .no-party-mode #forecastBadge, .no-party-mode .battle-stats,
+    .no-party-mode #upgradePanel, .no-party-mode #strategyPanel, .no-party-mode #battleTogglesPanel { display: none; }
+    .no-party-mode #noPartyPanel { display: block; margin-top: 14px; }
+    .content-card button.secondary { background: linear-gradient(145deg,#4d88a9,#365887); }
     .party-hp-track { height: 8px; margin-top: 6px; border-radius: 999px; background: rgba(0,0,0,.4); overflow: hidden; }
     .party-hp-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg,#3ddc84,#79ebbb); transition: width .2s ease; }
     .battle-toggles { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     .battle-toggles button { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: #302b5a; color: inherit; font-size: 9.5px; font-weight: 800; cursor: pointer; }
     .battle-toggles button.active { background: #6550ba; }
     .battle-toggles button:disabled { opacity: .4; cursor: default; }
+    .tier-toggles { display: flex; gap: 6px; }
+    .tier-btn { min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; background: #302b5a; color: inherit; font-size: 9.5px; font-weight: 800; cursor: pointer; }
+    .tier-btn.active { background: #6550ba; }
+    .tier-btn.locked { opacity: .45; }
 
     .content-list { display: grid; gap: 10px; margin-top: 12px; }
     .content-card { padding: 15px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
@@ -1053,8 +1090,8 @@
         </div>
 
         <div class="segment-panel active" data-segment-panel="path">
-          <article class="battle-arena" aria-label="자동 전투 화면">
-            <div class="stage-row"><span>별의 길 · 50 STAGES</span><strong>STAGE <span id="battleStage">18 / 50</span></strong><span id="speedLabel">×1 SPEED</span></div>
+          <article class="battle-arena" id="battleArena" aria-label="자동 전투 화면">
+            <div class="stage-row"><span id="stageRowLabel">별의 길 · 50 STAGES</span><strong><span id="stagePrefixLabel">STAGE </span><span id="battleStage">18 / 50</span></strong><span id="speedLabel">×1 SPEED</span></div>
             <div class="battle-scene" id="battleScene" style="--battle-bg:url('assets/images/backgrounds/푸른달_습지.jpg')">
               <div class="battle-bg" id="battleBackground" aria-hidden="true"></div>
               <div class="battle-ground" aria-hidden="true"></div>
@@ -1076,6 +1113,7 @@
               <div class="party-hp-track"><div class="party-hp-fill" id="partyHpFill"></div></div>
             </div>
           </article>
+          <div id="noPartyPanel"></div>
           <div id="forecastBadge"></div>
           <div class="battle-stats">
             <div class="battle-stat"><span>계정 레벨</span><strong>LV.<span id="userLevel">10</span></strong></div>
@@ -1083,23 +1121,31 @@
             <div class="battle-stat"><span>초당 피해</span><strong id="dpsValue">1.56b</strong></div>
             <div class="battle-stat"><span>처치 보상</span><strong id="rewardValue">30b</strong></div>
           </div>
-          <div class="upgrade-panel">
+          <div class="upgrade-panel" id="upgradePanel">
             <div><small>별빛 강화 LV.<span id="attackLevel">1</span></small><strong>일반 +2% · 보스 +0.5% / Lv.</strong></div>
             <div class="upgrade-actions">
               <button class="upgrade-btn" id="upgradeAttack">강화 · 💰 <span id="upgradeCost">1c</span></button>
               <button class="upgrade-btn secondary" id="bulkUpgradeAttack">일괄 강화</button>
             </div>
           </div>
-          <div class="strategy-panel">
+          <div class="strategy-panel" id="strategyPanel">
             <div class="ult-bar-head"><small>궁극기</small><strong id="ultimateText">준비 중</strong></div>
             <div class="ult-skill-bar" id="ultSkillBar" role="list" aria-label="정령별 궁극기"></div>
             <div class="strategy-actions"><button id="gotoParty">파티 편성</button></div>
           </div>
-          <div class="battle-toggles">
+          <div class="battle-toggles" id="battleTogglesPanel">
             <button id="ultimateAutoBtn" class="active">궁극기 자동</button>
             <button id="ultimateManualBtn">궁극기 수동</button>
-            <button id="speedToggleBtn">2배속</button>
-            <button id="hardModeBtn">하드 모드</button>
+            <div class="tier-toggles" id="speedToggleGroup">
+              <button class="tier-btn speed-btn" data-speed="1">1배속</button>
+              <button class="tier-btn speed-btn" data-speed="2">2배속</button>
+              <button class="tier-btn speed-btn" data-speed="3">3배속</button>
+            </div>
+            <div class="tier-toggles" id="difficultyTierGroup">
+              <button class="tier-btn" data-tier="easy">쉬움</button>
+              <button class="tier-btn" data-tier="normal">보통</button>
+              <button class="tier-btn" data-tier="hard">어려움</button>
+            </div>
             <button id="recommendTableBtn">ⓘ 권장 성장표</button>
           </div>
         </div>
@@ -1138,6 +1184,7 @@
         <div class="summon-actions">
           <button class="summon-btn single" data-pull="1"><strong>1회 소환</strong><span><b class="gem-mini">💎</b> 300</span></button>
           <button class="summon-btn ten" data-pull="10"><strong>10회 소환</strong><span><b class="gem-mini">💎</b> 3a</span></button>
+          <button class="summon-btn hundred" data-pull="100"><strong>100회 소환</strong><span><b class="gem-mini">💎</b> 30a</span></button>
         </div>
         <p class="guarantee">10회 소환 시 EPIC 이상 1명 확정 · 첫 10회에서 LEGENDARY 연출 체험 가능</p>
         <div class="exchange-row">
@@ -1184,6 +1231,12 @@
           <p id="saveStatus">5초마다 이 기기에 자동 저장됩니다. JSON 파일로 다른 기기에 옮길 수 있습니다.</p>
           <div class="system-actions"><button id="saveNow">지금 저장</button><button id="exportSave">내보내기</button><button id="importSave">불러오기</button></div>
           <input id="importFile" type="file" accept="application/json,.json" hidden>
+          <button class="reset-btn" id="resetBtn" style="margin-top:10px;width:100%">데이터 초기화(리세마라)</button>
+        </section>
+        <section class="system-card">
+          <h3>버전 정보</h3>
+          <p>현재 버전 <strong id="appVersionText">v0.0.0</strong></p>
+          <button id="patchNotesBtn" style="width:100%">패치 노트 보기</button>
         </section>
       </section>
     </main>
@@ -1218,6 +1271,7 @@
       <div class="sheet-head"><h3 id="settingsTitle">소환 연출 설정</h3><button class="icon-btn sheet-close" aria-label="닫기">✕</button></div>
       <div class="setting-row"><span>연출 사운드</span><button class="toggle on" id="soundToggle" aria-label="연출 사운드 켜짐"></button></div>
       <div class="setting-row"><span>모션·섬광 감소</span><button class="toggle" id="motionToggle" aria-label="모션 감소 꺼짐"></button></div>
+      <div class="setting-row"><span>연출 자동 건너뛰기(레전더리 제외)</span><button class="toggle" id="autoSkipToggle" aria-label="연출 자동 건너뛰기 꺼짐"></button></div>
       <div class="setting-row">
         <span>글자 크기</span>
         <div class="segmented-tabs" id="textSizeControl" style="margin:0">
@@ -1226,7 +1280,13 @@
           <button class="seg-btn" data-size="lg">크게</button>
         </div>
       </div>
-      <button class="reset-btn" id="resetBtn">체험 데이터 초기화</button>
+    </div>
+  </div>
+
+  <div class="sheet-backdrop" id="patchNotesSheet" role="dialog" aria-modal="true" aria-labelledby="patchNotesTitle">
+    <div class="sheet">
+      <div class="sheet-head"><h3 id="patchNotesTitle">패치 노트</h3><button class="icon-btn sheet-close" aria-label="닫기">✕</button></div>
+      <div id="patchNotesList"></div>
     </div>
   </div>
 
@@ -1319,6 +1379,7 @@
   <div class="results-overlay" id="resultsOverlay" role="dialog" aria-modal="true" aria-labelledby="resultsHeading">
     <div class="results-panel">
       <div class="results-title"><small>SUMMON COMPLETE</small><h2 id="resultsHeading">소환 결과</h2></div>
+      <div class="result-summary" id="resultSummary"></div>
       <div class="result-grid" id="resultGrid"></div>
       <div class="result-actions"><button class="again-btn" id="againBtn">다시 소환</button><button class="confirm-btn" id="confirmBtn">확인</button></div>
     </div>

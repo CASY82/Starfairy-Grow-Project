@@ -13,14 +13,17 @@ const rewardText = reward => [
 
 function growthRecommendation(store) {
   for (const slot of store.state.party) {
+    if (!slot) continue; // 신규
     const merge = store.previewBulkMergeHero?.(slot.name);
     if (merge?.ok) return `최우선 추천: ${slot.name} 성급 합치기`;
   }
   for (const slot of store.state.party) {
+    if (!slot) continue; // 신규
     if (store.previewBulkLevelUpHero(slot.name)?.ok) return `추천: ${slot.name} 정령 레벨업`;
   }
   if (store.previewBulkUpgradeAttack()?.ok) return '추천: 현재 상한 내 별빛 강화';
   for (const slot of store.state.party) {
+    if (!slot) continue; // 신규
     if (store.previewBulkUpgradeWeapon(slot.name)?.ok) return `추천: ${slot.name} 무기 강화`;
   }
   return '현재 즉시 실행 가능한 성장이 없어요. 순찰지를 확인해 보세요.';

@@ -2,6 +2,9 @@ import { $ } from '../dom/dom.js';
 import { track } from '../dom/analytics.js';
 import { formatUnit } from '../domain/units.js';
 import { rarityLabel, heroArtPath } from '../domain/heroCatalog.js';
+import { flushPendingDefeat } from './adventureView.js';
+
+const MEGA_HIGHLIGHT_MS = 2000;  // 레전더리 하이라이트 길이(legendary-mode CSS가 1.85초에 끝남)
 
 /**
  * 소환 뽑기 → 레전더리 영상/파티클 연출 → 결과 화면까지 이어지는 시퀀스.
@@ -47,6 +50,7 @@ export function initCinematic({ store, audio, toast, onDone }) {
     store.saveGame();
     revealIndex = 0;
     resultsOverlay.classList.remove('open');
+    if (count > 10) { startMegaPull(); return; } // 신규: 100연차 등 그룹 리빌 분기
     summonScene.className = 'summon-scene active';
     summonScene.setAttribute('aria-hidden', 'false');
     $('#revealCount').textContent = count > 1 ? `1 / ${count}` : '';
@@ -96,6 +100,9 @@ export function initCinematic({ store, audio, toast, onDone }) {
         if (navigator.vibrate) navigator.vibrate([40, 40, 90]);
       }, 9100);
       later(advanceReveal, 12200);
+    } else if (store.state.settings.autoSkipCinematic) {
+      revealCard.classList.add('show');
+      later(advanceReveal, 0); // 신규: 자동 건너뛰기 — 즉시 다음 카드로(레전더리는 위 분기로 예외)
     } else {
       if (audio.enabled) audio.playSoft(result.rarity);
       startParticles(false);
@@ -112,11 +119,52 @@ export function initCinematic({ store, audio, toast, onDone }) {
 
   function skipCinematic() {
     if (!store.busy) return;
-    track('cinematic_skip', { rarity: currentResults[revealIndex]?.rarity });
+    track('cinematic_skip', {
+      rarity: currentResults.length > 10 ? undefined : currentResults[revealIndex]?.rarity,
+      count: currentResults.length
+    });
     clearTimers();
     stopParticles();
     stopSummonVideo(true);
     showResults();
+  }
+
+  /** 100연차 등 10회 초과 뽑기 — 모바일에서 문제가 됐던 슬라이드 스트립 연출은 제거하고,
+   * 레전더리가 있으면 그 카드만 순서대로 하이라이트한 뒤(항목4 요구사항 유지) 곧장 결과
+   * 리스트로 넘어간다. 레전더리가 하나도 없으면 중간 화면 없이 즉시 결과로 이동한다. */
+  function startMegaPull() {
+    const legendaries = currentResults.map((r, i) => ({ r, i })).filter(x => x.r.rarity === 'legendary');
+    if (legendaries.length === 0) { showResults(); return; }
+    summonScene.className = 'summon-scene active';
+    summonScene.setAttribute('aria-hidden', 'false');
+    revealMegaLegendaries(legendaries, 0, showResults);
+  }
+
+  function revealMegaLegendaries(list, idx, done) {
+    if (idx >= list.length) { done(); return; } // 자동 건너뛰기 설정과 무관 — 레전더리는 항상 재생
+    const { r } = list[idx];
+    revealCard.className = 'reveal-card legendary';
+    revealCard.innerHTML = cardMarkup(r);
+    summonScene.classList.add('legendary-mode'); // 죽어있던 CSS를 재사용(영상 없음)
+    void summonScene.offsetWidth;
+    startParticles(true);
+    if (audio.enabled) audio.playSoft('legendary');
+    if (navigator.vibrate) navigator.vibrate([40, 40, 90]);
+    $('#revealCount').textContent = list.length > 1 ? `레전더리 ${idx + 1} / ${list.length}` : '';
+    later(() => revealCard.classList.add('show'), 60);
+    later(() => {
+      revealCard.classList.remove('show');
+      summonScene.classList.remove('legendary-mode');
+      stopParticles();
+      revealMegaLegendaries(list, idx + 1, done);
+    }, MEGA_HIGHLIGHT_MS);
+  }
+
+  function rarityCountSummary(results) {
+    const order = ['legendary', 'epic', 'rare', 'magic', 'common'];
+    const counts = order.reduce((acc, r) => { acc[r] = 0; return acc; }, {});
+    results.forEach(r => { counts[r.rarity] += 1; });
+    return order.filter(r => counts[r] > 0).map(r => `<span class="summary-chip ${r}">${rarityLabel(r)} ×${counts[r]}</span>`).join('');
   }
 
   function showResults() {
@@ -125,17 +173,21 @@ export function initCinematic({ store, audio, toast, onDone }) {
     stopSummonVideo(true);
     summonScene.className = 'summon-scene';
     summonScene.setAttribute('aria-hidden', 'true');
+    const count = currentResults.length;
+    $('#resultSummary').innerHTML = count >= 10 ? rarityCountSummary(currentResults) : '';
     resultGrid.innerHTML = currentResults.map((item, index) => {
       const portrait = `<img src="${heroArtPath(item.name)}" alt="">`;
-      return `<article class="result-item ${item.rarity}" style="animation-delay:${index * 45}ms">
+      return `<article class="result-item ${item.rarity}" style="animation-delay:${Math.min(index, 20) * 45}ms">
         ${item.isNew ? '<span class="new-badge">NEW</span>' : ''}
         <div class="result-portrait">${portrait}</div>
         <div class="result-copy"><small>${rarityLabel(item.rarity)} · ${item.rarity.toUpperCase()}</small><strong>${item.name}</strong><span>${item.isNew ? `${item.element} · ${item.role}` : '중복 · 기억의 별 +10'}</span></div>
       </article>`;
     }).join('');
-    const isTen = currentResults.length === 10;
-    if (lastBannerType === 'bond') $('#againBtn').textContent = isTen ? '다시 10회 · 인연 3,000' : '다시 1회 · 인연 300';
-    else $('#againBtn').textContent = isTen ? '다시 10회 · 💎 3a' : '다시 1회 · 💎 300';
+    if (lastBannerType === 'bond') {
+      $('#againBtn').textContent = count > 1 ? `다시 ${count}회 · 인연 ${(count * 300).toLocaleString('ko-KR')}` : '다시 1회 · 인연 300';
+    } else {
+      $('#againBtn').textContent = count > 1 ? `다시 ${count}회 · 💎 ${formatUnit(store.pullCost(count))}` : '다시 1회 · 💎 300';
+    }
     resultsOverlay.classList.add('open');
     store.busy = false;
     onDone();
@@ -199,7 +251,7 @@ export function initCinematic({ store, audio, toast, onDone }) {
 
   window.addEventListener('resize', resizeCanvas);
   $('#skipBtn').addEventListener('click', skipCinematic);
-  $('#confirmBtn').addEventListener('click', () => resultsOverlay.classList.remove('open'));
+  $('#confirmBtn').addEventListener('click', () => { resultsOverlay.classList.remove('open'); flushPendingDefeat(store); });
   $('#againBtn').addEventListener('click', () => {
     const count = currentResults.length;
     resultsOverlay.classList.remove('open');
