@@ -1,7 +1,7 @@
 import { $ } from '../dom/dom.js';
 import { confirmAction } from '../dom/confirm.js';
 import { formatUnit } from '../domain/units.js';
-import { heroSdImagePath, weaponImagePath, RARITY_COLOR, rarityLabel, heroRarityOf, heroElementOf, heroRoleOf } from '../domain/heroCatalog.js';
+import { heroSdImagePath, heroImagePath, weaponImagePath, RARITY_COLOR, rarityLabel, heroRarityOf, heroElementOf, heroRoleOf } from '../domain/heroCatalog.js';
 import { flushPendingDefeat } from './adventureView.js';
 
 const STAR_MULTIPLIER_TEXT = [0, 1, 2, 4, 10, 35, 170]; // GameStore.js STAR_MULTIPLIERS와 값을 맞춘 표시 전용 사본
@@ -11,6 +11,8 @@ const BOND_STORY = {
   5: '"당신과 함께라면 어떤 별자리도 두렵지 않아요."',
   10: '"우리의 인연은 이제 별빛 속에 새겨졌어요."'
 };
+const ELEMENT_ICON = { 달빛: '🌙', 불꽃: '🔥', 숲: '🌿', 어둠: '🌑', 물결: '💧', 빛: '✨' };
+const ROLE_TRAIT = { 수호: '체력·보호막 특화', 전사: '근접 공격·생존 특화', 사수: '물리 공격 특화', 술사: '마법 공격 특화', 지원: '파티 회복 특화' };
 
 let sortMode = 'power';
 let openHeroName = null;
@@ -141,17 +143,30 @@ function renderHeroDetail() {
   const bulkPromote = store.previewBulkPromoteWeapon(name);
   const bondNeed = 100 * (hero.bond + 1);
   const bondStoryKeys = [1, 5, 10].filter(k => hero.bond >= k);
+  const stats = store.heroCombatStats(name);
+  const element = heroElementOf(name);
+  const role = heroRoleOf(name);
+  const damageLabel = stats.damageType === 'mag' ? '마법' : '물리';
+  const elementState = stats.elementPermille > 1000 ? '상성 우위' : stats.elementPermille < 1000 ? '상성 열위' : '상성 중립';
 
   $('#heroDetailContent').innerHTML = `
     <div class="sheet-head"><h3>${name}</h3><button class="icon-btn" data-action="close-detail" aria-label="닫기">✕</button></div>
-    <div class="hero-detail-head">
-      <img src="${heroSdImagePath(name)}" alt="${name}" style="border:2px solid ${color}">
-      <div>
-        <strong style="font-size:16px">${name}</strong>
-        <div style="color:${color};font-size:10px;font-weight:800">${rarityLabel(rarity)} · ${heroElementOf(name)} · ${heroRoleOf(name)}</div>
-        <div style="color:var(--muted);font-size:10px;margin-top:2px">Lv.${formatUnit(hero.level)} · ★${hero.star} · 인연 ${hero.bond}단계</div>
+    <div class="hero-detail-art" style="--hero-rarity:${color}">
+      <img src="${heroImagePath(name)}" alt="${name} 캐릭터 원화">
+      <div class="hero-detail-art-copy">
+        <span>${rarityLabel(rarity)}</span>
+        <strong>${name}</strong>
+        <small>Lv.${formatUnit(hero.level)} · ★${hero.star} · 인연 ${hero.bond}단계</small>
       </div>
     </div>
+
+    <div class="hero-stat-grid" aria-label="${name} 현재 능력치">
+      <div class="hero-stat-card primary"><small>현재 공격력</small><strong>${formatUnit(stats.attack)}</strong><span>${role === '지원' ? '기본 행동: 파티 회복' : `${damageLabel} 피해`}</span></div>
+      <div class="hero-stat-card primary"><small>현재 HP</small><strong>${formatUnit(stats.hp)}</strong><span>${stats.deployed ? '현재 파티 배치 반영' : '권장 열 기준'}</span></div>
+      <div class="hero-stat-card"><small>속성</small><strong>${ELEMENT_ICON[element] || '✦'} ${element}</strong><span>${elementState} · ×${(stats.elementPermille / 1000).toFixed(2)}</span></div>
+      <div class="hero-stat-card"><small>역할</small><strong>${role}</strong><span>${ROLE_TRAIT[role] || damageLabel}</span></div>
+    </div>
+    <p class="hero-stat-context">STAGE ${stats.stage} 기준 · ${damageLabel} 저항 계수 ×${(stats.resistPermille / 1000).toFixed(2)} · ${stats.row === 'front' ? '전열' : '후열'} 계산</p>
 
     <div class="hero-detail-section">
       <h4>레벨업</h4>

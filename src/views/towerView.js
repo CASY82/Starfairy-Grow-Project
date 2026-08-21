@@ -6,7 +6,7 @@ export function initTowerView({ store, toast, onChange, onNavigateSegment }) {
     if (!event.target.closest('button[data-tower-attempt]')) return;
     const result = store.startTowerBattle();
     if (!result.ok) {
-      if (result.reason === 'element') toast.show(`이 구간은 ${result.required} 속성 정령으로만 편성해야 도전할 수 있어요.`);
+      if (result.reason === 'role') toast.show(`${result.requiredRole} 역할 정령을 ${result.requiredCount}명 이상 편성해야 도전할 수 있어요.`);
       else if (result.reason === 'busy') toast.show('이미 다른 전투가 진행 중이에요.');
       else toast.show('아직 해금되지 않았어요.');
       return;
@@ -28,13 +28,13 @@ export function refreshTowerView(store) {
     return;
   }
   const floor = store.state.tower.floor;
-  const req = store.towerElementRequirement(floor);
+  const requirement = store.towerPartyRequirement(floor);
   const forecast = store.towerForecast();
   const badgeClass = forecast.verdict === '예상 승리' ? 'win' : forecast.verdict === '공격력 부족' ? 'atk' : 'hp';
   panel.innerHTML = `
     <div class="content-card">
       <h3>🗼 별자리 탑 · ${floor}층</h3>
-      <p>10층마다 편성 속성 제한이 걸립니다.${req ? ` 이번 구간은 <strong style="color:var(--gold)">${req}</strong> 속성 전원 편성 필요.` : ' 이번 구간은 속성 제한이 없습니다.'} 10층 단위 클리어마다 기억의 별과 무기 도면을 받습니다.</p>
+      <p>이번 10층 구간은 <strong style="color:var(--gold)">${requirement.role}</strong> 역할 정령을 ${requirement.count}명 이상 편성해야 합니다. 속성 제한은 추후 정령 로스터 확장과 함께 추가됩니다. 10층 단위 클리어마다 기억의 별과 무기 도면을 받습니다.</p>
       <span class="forecast-badge ${badgeClass}">${forecast.verdict}</span>
       <button data-tower-attempt>${floor}층 도전</button>
     </div>

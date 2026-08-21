@@ -662,39 +662,65 @@ export default class GameStore {
     return enhance + camp;
   }
 
+  /** 정령 1인의 현재 스테이지 기준 원시 공격/HP 기여도. 파티 합산과 상세 화면이 공유한다. */
+  #heroStatContribution(name, row = 'front') {
+    const hero = this.#state.heroes[name];
+    if (!hero) return null;
+    const rarity = heroRarityOf(name);
+    const budget = RARITY_BUDGET[rarity] ?? RARITY_BUDGET.common;
+    const band = levelBandMul(hero.level);
+    const levelMul = (1 + 0.01 * (hero.level - 1)) * band;
+    const hpLevelMul = (1 + 0.012 * (hero.level - 1)) * band;
+    const starMul = STAR_MULTIPLIERS[hero.star];
+    const weaponMul = this.#weaponContribution(hero, this.#stageType(this.#battle.stage));
+    const rowMul = row === 'back' ? 1.05 : 1.0;
+    const role = heroRoleOf(name);
+    const weight = ROLE_STAT_WEIGHTS[role] || { atk: 1, hp: 1, damage: 'phys' };
+    const chapterIndex = chapterOfStage(this.#battle.stage);
+    let resist = ENEMY_RESIST[chapterIndex]?.[weight.damage] ?? 1000;
+    if (this.#stageType(this.#battle.stage) === 'boss') resist = 1000 + (resist - 1000) * 3 / 2;
+    const elementPermille = heroElementMultiplier(heroElementOf(name), CHAPTER_ELEMENT[chapterIndex]);
+    const attack = budget * levelMul * starMul * (1 + weaponMul) * rowMul * weight.atk * (elementPermille / 1000) * (resist / 1000);
+    const hp = budget * hpLevelMul * starMul * weight.hp;
+    return { attack, hp, role, damageType: weight.damage, elementPermille, resistPermille: resist, row };
+  }
+
+  /** 상세 화면용 현재 능력치. 배치 중이면 실제 열을, 미배치면 역할 권장 열을 사용한다. */
+  heroCombatStats(name) {
+    const role = heroRoleOf(name);
+    const deployed = this.#state.party.find(slot => slot?.name === name);
+    const row = deployed?.row || (['수호', '전사'].includes(role) ? 'front' : 'back');
+    const raw = this.#heroStatContribution(name, row);
+    if (!raw) return null;
+    const members = this.#state.party.filter(Boolean).map(slot => slot.name);
+    const roleMul = deployed ? roleCompletionMultiplier(members) : 1;
+    const accountMul = 1 + 0.006 * (this.#state.account.level - 1);
+    const lossMul = this.#battle.consecutiveLosses >= 6 ? 1.08 : this.#battle.consecutiveLosses >= 3 ? 1.05 : 1;
+    const attack = BigInt(Math.max(1, Math.round(raw.attack * roleMul * accountMul * PARTY_ATTACK_BASE)));
+    const effectiveAttack = role === '지원' ? 0n : (attack * BigInt(1000 + this.#attackBonusTenths())) / 1000n;
+    const hp = BigInt(Math.max(1, Math.round(raw.hp * accountMul * lossMul * PARTY_HP_BASE)));
+    return { ...raw, attack: effectiveAttack, hp, deployed: !!deployed, stage: this.#battle.stage };
+  }
+
   /** §05-5: 편성 5인을 합산해 battle.attack/partyMaxHp를 다시 계산한다. 부작용 없는 재호출 안전 함수. */
   recomputePartyStats() {
     const accountLevelMul = 1 + 0.006 * (this.#state.account.level - 1);
-    const stageType = this.#stageType(this.#battle.stage);
     const consecutiveBonus = this.#battle.consecutiveLosses >= 6 ? 1.08 : this.#battle.consecutiveLosses >= 3 ? 1.05 : 1;
     let attack = 0;
     let hp = 0;
     const contributions = [0, 0, 0, 0, 0];
-    const chapterIndex = chapterOfStage(this.#battle.stage);
-    const chapterElement = CHAPTER_ELEMENT[chapterIndex];
     let supportContribution = 0, supportCount = 0, guardianCount = 0;
     for (let i = 0; i < this.#state.party.length; i += 1) {
       const slot = this.#state.party[i];
       if (!slot) continue; // 신규: 빈 슬롯 건너뜀
       const hero = this.#state.heroes[slot.name];
       if (!hero) continue;
-      const rarity = heroRarityOf(slot.name);
-      const budget = RARITY_BUDGET[rarity] ?? RARITY_BUDGET.common;
-      const band = levelBandMul(hero.level);
-      const levelMul = (1 + 0.01 * (hero.level - 1)) * band;
-      const hpLevelMul = (1 + 0.012 * (hero.level - 1)) * band;
-      const starMul = STAR_MULTIPLIERS[hero.star];
-      const weaponMul = this.#weaponContribution(hero, stageType);
-      const rowMul = slot.row === 'back' ? 1.05 : 1.0;
-      const role = heroRoleOf(slot.name);
-      const weight = ROLE_STAT_WEIGHTS[role] || { atk: 1, hp: 1, damage: 'phys' };
-      let resist = ENEMY_RESIST[chapterIndex]?.[weight.damage] ?? 1000;
-      if (this.#stageType(this.#battle.stage) === 'boss') resist = 1000 + (resist - 1000) * 3 / 2;
-      const element = heroElementMultiplier(heroElementOf(slot.name), chapterElement) / 1000;
-      const contribution = budget * levelMul * starMul * (1 + weaponMul) * rowMul * weight.atk * element * (resist / 1000);
+      const stats = this.#heroStatContribution(slot.name, slot.row);
+      const role = stats.role;
+      const contribution = stats.attack;
       contributions[i] = contribution;
       attack += contribution;
-      hp += budget * hpLevelMul * starMul * weight.hp;
+      hp += stats.hp;
       if (role === '지원') { supportContribution += contribution; supportCount += 1; }
       if (role === '수호') guardianCount += 1;
     }
@@ -2024,23 +2050,26 @@ export default class GameStore {
   }
 
   // -------------------------------------------------------------- 별자리 탑
-  towerElementRequirement(floor) {
-    const band = Math.floor((floor - 1) / 10);
-    if (band === 0) return null;
-    const cycle = ['불꽃', '물결', '숲', '빛', '어둠'];
-    return cycle[(band - 1) % cycle.length];
+  towerElementRequirement(_floor) {
+    // 속성 제한은 속성별 로스터가 충분해지는 후속 콘텐츠 시점까지 보류한다.
+    return null;
   }
 
-  /** 별자리 탑 라이브 전투를 시작한다. 해금/속성 제한만 검증하고 승패는 판정하지 않는다 —
+  towerPartyRequirement(floor) {
+    const roles = ['수호', '전사', '사수', '술사', '지원'];
+    return { kind: 'role', role: roles[Math.floor((floor - 1) / 10) % roles.length], count: 1 };
+  }
+
+  /** 별자리 탑 라이브 전투를 시작한다. 현재 구간의 역할 편성 조건을 검증하되 승패는 판정하지 않는다 —
    * 이후 tickAdventure()가 매 0.8초(2배속 0.4초)마다 tickSubBattle()을 호출해 실제로 겨룬다. */
   startTowerBattle() {
     if (!this.#state.unlocked.tower) return { ok: false, reason: 'locked' };
     if (this.#subBattle) return { ok: false, reason: 'busy' };
     const floor = this.#state.tower.floor;
-    const req = this.towerElementRequirement(floor);
-    if (req) {
-      const allMatch = this.#state.party.every(s => s && heroElementOf(s.name) === req); // 신규: null 슬롯 가드(빈 슬롯이 있으면 속성 제한 통과 불가)
-      if (!allMatch) return { ok: false, reason: 'element', required: req };
+    const requirement = this.towerPartyRequirement(floor);
+    const matchingRoles = this.#state.party.filter(slot => slot && heroRoleOf(slot.name) === requirement.role).length;
+    if (matchingRoles < requirement.count) {
+      return { ok: false, reason: 'role', requiredRole: requirement.role, requiredCount: requirement.count };
     }
     this.recomputePartyStats();
     const enemyMaxHp = BigInt(Math.round(20000000 * Math.pow(1.09, floor - 1))); // 기존 공식 그대로
