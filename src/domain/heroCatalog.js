@@ -154,6 +154,29 @@ export function heroVfxProfileOf(name) {
   });
 }
 
+export const HERO_ULTIMATE_SPEC = Object.freeze({
+  '네레이': { kind: 'weaken', dmg: 10, shield: 45, weakenPct: 150, weakenTicks: 5 },
+  '브램': { kind: 'reflect', dmg: 10, shield: 45, reflectPct: 200 },
+  '버블': { kind: 'shield', dmg: 20, shield: 45 },
+  '이그니스': { kind: 'damage', dmg: 35, missingHpDmg: 20 },
+  '피로': { kind: 'dot', dmg: 35, dotTenths: 15, dotTicks: 8 },
+  '리프': { kind: 'buff', dmg: 42, buffPct: 18, buffTicks: 20 },
+  '애쉬': { kind: 'damage', dmg: 45 },
+  '녹티스': { kind: 'pierce', dmg: 45, pierce: true },
+  '아스트라': { kind: 'critical', dmg: 28, guaranteedCritical: true },
+  '코멧': { kind: 'damage', dmg: 55 },
+  '스파크': { kind: 'weaken', dmg: 52, weakenPct: 15, weakenTicks: 15 },
+  '더스크': { kind: 'dot', dmg: 45, dotTenths: 15, dotTicks: 8 },
+  '루나리아': { kind: 'weaken', dmg: 35, weakenPct: 300, weakenTicks: 5 },
+  '마리나': { kind: 'weaken', dmg: 45, weakenPct: 30, weakenTicks: 25 },
+  '글림': { kind: 'weaken', dmg: 45, weakenPct: 50, weakenTicks: 15 },
+  '실바나': { kind: 'heal-shield', dmg: 0, heal: 140, overhealShield: true },
+  '솔레아': { kind: 'buff', dmg: 0, heal: 60, buffPct: 120, buffTicks: 20 },
+  '모스': { kind: 'hot', dmg: 0, heal: 140, hotTicks: 10 },
+  '듀': { kind: 'heal-shield', dmg: 0, heal: 100, shield: 30 },
+  '클로버': { kind: 'heal', dmg: 0, heal: 140 }
+});
+
 // §06-3 역할 완성도: 수호 > 전사 > 사수 > 술사 > 지원 순으로 전열 우선 배치(자동 편성용).
 export const ROLE_FRONT_PRIORITY = ['수호', '전사', '사수', '술사', '지원'];
 

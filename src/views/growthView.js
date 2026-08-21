@@ -169,8 +169,8 @@ function renderHeroDetail() {
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${mergeInfo.maxed ? '최대 성급' : `${mergeInfo.next}성 · 조각 ${mergeInfo.pool}/${mergeInfo.cost}${mergeInfo.needOwnShard ? ` · 전용조각 ${mergeInfo.ownShards}/1` : ''}`}</span>
         <div class="hero-detail-actions">
-          <button data-action="merge" ${mergeInfo.maxed || mergeInfo.pool < mergeInfo.cost || (mergeInfo.needOwnShard && mergeInfo.ownShards < 1) ? 'disabled' : ''}>${mergeInfo.maxed ? '완료' : `합치기 ×${STAR_MULTIPLIER_TEXT[mergeInfo.next].toFixed(2)}`}</button>
-          <button class="bulk-action-btn" data-action="merge-bulk" ${!bulkMerge.ok ? 'disabled' : ''}>★${bulkMerge.from}→${bulkMerge.to}</button>
+          <button data-action="merge" ${mergeInfo.maxed || mergeInfo.pool < mergeInfo.cost || (mergeInfo.needOwnShard && mergeInfo.ownShards < 1) ? 'disabled' : ''}>${mergeInfo.maxed ? '완료' : '1번 강화'}</button>
+          <button class="bulk-action-btn" data-action="merge-bulk" ${!bulkMerge.ok ? 'disabled' : ''}>일괄 강화</button>
         </div>
       </div>
     </div>
@@ -194,15 +194,15 @@ function renderHeroDetail() {
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${hero.weaponLevel >= 20 ? '강화 상한' : `별철 ${weaponCost}`}</span>
         <div class="hero-detail-actions">
-          <button data-action="weapon-upgrade" ${hero.weaponLevel >= 20 || store.state.materials.starIron < weaponCost ? 'disabled' : ''}>강화</button>
-          <button class="bulk-action-btn" data-action="weapon-upgrade-bulk" ${!bulkWeapon.ok ? 'disabled' : ''}>Lv.${bulkWeapon.from}→${bulkWeapon.to}</button>
+          <button data-action="weapon-upgrade" ${hero.weaponLevel >= 20 || store.state.materials.starIron < weaponCost ? 'disabled' : ''}>1번 강화</button>
+          <button class="bulk-action-btn" data-action="weapon-upgrade-bulk" ${!bulkWeapon.ok ? 'disabled' : ''}>일괄 강화</button>
         </div>
       </div>
       <div class="hero-detail-row">
         <span style="font-size:10px;color:var(--muted)">${hero.weaponStar >= 5 ? '승급 상한' : `도면 ${weaponPromoteCost} 필요 / ${store.state.weaponBlueprint} 보유`}</span>
         <div class="hero-detail-actions">
-          <button data-action="weapon-promote" ${hero.weaponStar >= 5 || store.state.weaponBlueprint < weaponPromoteCost ? 'disabled' : ''}>${hero.weaponStar >= 5 ? '완료' : `승급 ×${WEAPON_STAR_TEXT[hero.weaponStar + 1].toFixed(2)}`}</button>
-          <button class="bulk-action-btn" data-action="weapon-promote-bulk" ${!bulkPromote.ok ? 'disabled' : ''}>★${bulkPromote.from}→${bulkPromote.to}</button>
+          <button data-action="weapon-promote" ${hero.weaponStar >= 5 || store.state.weaponBlueprint < weaponPromoteCost ? 'disabled' : ''}>${hero.weaponStar >= 5 ? '완료' : '1번 승급'}</button>
+          <button class="bulk-action-btn" data-action="weapon-promote-bulk" ${!bulkPromote.ok ? 'disabled' : ''}>일괄 승급</button>
         </div>
       </div>
     </div>

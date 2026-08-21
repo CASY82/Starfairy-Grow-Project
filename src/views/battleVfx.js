@@ -88,7 +88,7 @@ class BattleVfx {
     return true;
   }
 
-  playUltimate({ heroName, attackerElement, targetElement, speed = 1, queueIndex = 0 }) {
+  playUltimate({ heroName, attackerElement, targetElement, speed = 1, queueIndex = 0, kind = 'damage' }) {
     const profile = heroVfxProfileOf(heroName);
     if (!this.ctx || !profile) return false;
     const timer = setTimeout(() => {
@@ -96,7 +96,7 @@ class BattleVfx {
       const points = this.points(attackerElement, targetElement);
       this.add({ type: 'ultimate', profile, ...points, compact: queueIndex >= 3,
         duration: this.effectiveQuality() === 'minimal' ? 300 : speed === 2 ? 620 : 900 });
-      window.dispatchEvent(new CustomEvent('battle-vfx-play', { detail: { type: 'ultimate', heroName, preset: profile.ultimatePreset } }));
+      window.dispatchEvent(new CustomEvent('battle-vfx-play', { detail: { type: 'ultimate', heroName, preset: profile.ultimatePreset, kind } }));
     }, queueIndex * 120);
     this.timers.add(timer);
     return true;

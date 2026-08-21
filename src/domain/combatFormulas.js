@@ -2,6 +2,16 @@
 // 입력값만으로 계수를 계산한다 — unimplemented-features-design-spec.md §06 그대로 이식.
 import { heroRoleOf, heroElementOf, elementBeats } from './heroCatalog.js';
 
+const HERO_ELEMENT_MUL = { advantage: 1250, neutral: 1000, disadvantage: 800 };
+
+/** Phase 5: 파티 다수결이 아닌 정령 개인의 속성 상성(천분율). */
+export function heroElementMultiplier(heroElement, chapterElement) {
+  if (!heroElement || !chapterElement) return HERO_ELEMENT_MUL.neutral;
+  if (elementBeats(heroElement, chapterElement)) return HERO_ELEMENT_MUL.advantage;
+  if (elementBeats(chapterElement, heroElement)) return HERO_ELEMENT_MUL.disadvantage;
+  return HERO_ELEMENT_MUL.neutral;
+}
+
 /** §06-3 역할 완성도 계수. members는 정령 이름 배열(파티 5인). */
 export function roleCompletionMultiplier(members) {
   const roles = new Set(members.map(name => heroRoleOf(name)).filter(Boolean));

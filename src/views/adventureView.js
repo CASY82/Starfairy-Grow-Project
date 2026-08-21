@@ -169,11 +169,17 @@ function queueUltimateCast(store, fired, queueIndex = 0) {
     attackerElement: attacker,
     targetElement: enemy,
     speed: store.state.battleSpeed,
-    queueIndex
+    queueIndex,
+    kind: fired.kind
   });
 
   const hitDelay = (ULT_HIT_BASE_MS[store.state.battleSpeed] ?? ULT_HIT_BASE_MS[1]) + queueIndex * 120;
-  presentationTimeout(() => spawnDamage(fired.bonus, false, true), hitDelay);
+  presentationTimeout(() => {
+    if (fired.bonus > 0n) spawnDamage(fired.bonus, false, 'ult');
+    if (fired.healed > 0n) spawnDamage(fired.healed, false, 'heal');
+    if (fired.shielded > 0n) spawnDamage(fired.shielded, false, 'shield');
+    if (fired.reflected > 0n) spawnDamage(fired.reflected, false, 'reflect');
+  }, hitDelay);
 }
 
 function applyUltimateResult(store, toast, result) {
@@ -321,13 +327,34 @@ function updateEnemyDisplay(store) {
   $('#battleScene').style.setProperty('--battle-offset', `${-((stage - 1) % 10) * 93}px`);
 }
 
-function spawnDamage(damage, critical, ultimate = false) {
+function spawnDamage(damage, critical, kind = '') {
+  if (damage <= 0n) return;
   const pop = document.createElement('span');
-  pop.className = `damage-pop${critical ? ' crit' : ''}${ultimate ? ' ult' : ''}`;
-  pop.textContent = `${ultimate ? 'ULT ' : critical ? 'CRIT ' : ''}-${formatUnit(damage)}`;
+  pop.className = `damage-pop${critical ? ' crit' : ''}${kind ? ` ${kind}` : ''}`;
+  const positive = ['heal', 'shield'].includes(kind);
+  pop.textContent = `${kind === 'ult' ? 'ULT ' : critical ? 'CRIT ' : kind === 'shield' ? 'SHIELD ' : kind === 'reflect' ? 'REFLECT ' : ''}${positive ? '+' : '-'}${formatUnit(damage)}`;
   pop.style.marginLeft = `${Math.round((Math.random() - 0.5) * 54)}px`;
   $('#damageLayer').appendChild(pop);
-  presentationTimeout(() => pop.remove(), ultimate ? 900 : 780);
+  presentationTimeout(() => pop.remove(), kind === 'ult' ? 900 : 780);
+}
+
+function presentCombatFeedback(store, result, attacker, attackerName, enemySprite) {
+  const healing = heroRoleOf(attackerName) === '지원';
+  battleVfx.playBasicAttack({ heroName: attackerName, attackerElement: attacker,
+    targetElement: healing ? attacker : enemySprite, critical: result.critical, speed: store.state.battleSpeed });
+  const activeBattle = store.subBattle || store.battle;
+  $$('.unit').forEach(unit => {
+    unit.classList.toggle('shielded', activeBattle.shield > 0n);
+    unit.classList.toggle('reflecting', activeBattle.shield > 0n && activeBattle.reflectPct > 0);
+  });
+  if (healing && attacker) { attacker.classList.add('healing'); presentationTimeout(() => attacker.classList.remove('healing'), 520); }
+  const delay = battleVfx.effectiveQuality() === 'minimal' ? 80 : (BASIC_HIT_MS[store.state.battleSpeed] ?? BASIC_HIT_MS[1]);
+  presentationTimeout(() => {
+    if (result.damage > 0n) { enemySprite.classList.add('hit'); presentationTimeout(() => enemySprite.classList.remove('hit'), 180); spawnDamage(result.damage, result.critical); }
+    if (result.healed > 0n) spawnDamage(result.healed, false, 'heal');
+    if (result.absorbed > 0n) spawnDamage(result.absorbed, false, 'shield');
+    if (result.reflected > 0n) spawnDamage(result.reflected, false, 'reflect');
+  }, delay);
 }
 
 function showDefeatOverlay(defeatInfo) {
@@ -399,14 +426,7 @@ export function tickAdventure(store, toast) {
     if (battleVfx.effectiveQuality() !== 'minimal') attacker.classList.add('attack');
     presentationTimeout(() => attacker.classList.remove('attack'), LUNGE_REMOVE_MS[store.state.battleSpeed] ?? LUNGE_REMOVE_MS[1]);
   }
-  battleVfx.playBasicAttack({ heroName: attackerName, attackerElement: attacker, targetElement: enemySprite,
-    critical: result.critical, speed: store.state.battleSpeed });
-  const basicHitDelay = battleVfx.effectiveQuality() === 'minimal' ? 80 : (BASIC_HIT_MS[store.state.battleSpeed] ?? BASIC_HIT_MS[1]);
-  presentationTimeout(() => {
-    enemySprite.classList.add('hit');
-    presentationTimeout(() => enemySprite.classList.remove('hit'), 180);
-    spawnDamage(result.damage, result.critical);
-  }, basicHitDelay);
+  presentCombatFeedback(store, result, attacker, attackerName, enemySprite);
   result.ultimatesFired.forEach((fired, index) => queueUltimateCast(store, fired, index));
 
   if (result.killed) {
@@ -442,14 +462,7 @@ function tickSubBattle(store, toast) {
     if (battleVfx.effectiveQuality() !== 'minimal') attacker.classList.add('attack');
     presentationTimeout(() => attacker.classList.remove('attack'), LUNGE_REMOVE_MS[store.state.battleSpeed] ?? LUNGE_REMOVE_MS[1]);
   }
-  battleVfx.playBasicAttack({ heroName: attackerName, attackerElement: attacker, targetElement: enemySprite,
-    critical: result.critical, speed: store.state.battleSpeed });
-  const basicHitDelay = battleVfx.effectiveQuality() === 'minimal' ? 80 : (BASIC_HIT_MS[store.state.battleSpeed] ?? BASIC_HIT_MS[1]);
-  presentationTimeout(() => {
-    enemySprite.classList.add('hit');
-    presentationTimeout(() => enemySprite.classList.remove('hit'), 180);
-    spawnDamage(result.damage, result.critical);
-  }, basicHitDelay);
+  presentCombatFeedback(store, result, attacker, attackerName, enemySprite);
   result.ultimatesFired.forEach((fired, index) => queueUltimateCast(store, fired, index));
 
   if (result.resolved) {

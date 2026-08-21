@@ -314,6 +314,14 @@
     .damage-pop.crit::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: 42px; height: 42px; border: 3px solid #ff6575; border-radius: 50%; transform: translate(-50%,-50%); animation: crit-ring .32s ease-out forwards; }
     @keyframes crit-ring { from { opacity: .9; scale: .35; } to { opacity: 0; scale: 1.45; } }
     .damage-pop.ult { color: #ffe9ab; font-size: 26px; text-shadow: 0 2px 4px #5b3400, 0 0 12px var(--gold); }
+    .damage-pop.heal { left: 28%; top: 67%; color: #a7ff9f; text-shadow: 0 2px 4px #124f2e, 0 0 12px #48e879; }
+    .damage-pop.shield { left: 30%; top: 58%; color: #a9ecff; text-shadow: 0 2px 4px #15547a, 0 0 12px #35c8ff; font-size: 17px; }
+    .damage-pop.reflect { color: #f0a4ff; text-shadow: 0 2px 4px #501767, 0 0 12px #d255ff; }
+    .unit.shielded::after, .unit.healing::after { content: ""; position: absolute; z-index: 3; width: 76px; height: 76px; left: 50%; top: 50%; transform: translate(-50%,-50%); background-image: url('assets/images/vfx/combat-support-atlas.png'); background-size: 300% 100%; background-position: 50% 0; pointer-events: none; filter: drop-shadow(0 0 8px #35c8ff); animation: support-vfx-pulse .8s ease-in-out infinite alternate; }
+    .unit.healing::after { background-position: 0 0; filter: drop-shadow(0 0 8px #48e879); animation: support-vfx-bloom .52s ease-out both; }
+    .unit.shielded.reflecting::after { background-position: 100% 0; filter: drop-shadow(0 0 9px #d255ff); }
+    @keyframes support-vfx-pulse { from { opacity: .48; scale: .88; } to { opacity: .9; scale: 1.03; } }
+    @keyframes support-vfx-bloom { from { opacity: 0; scale: .45; } 40% { opacity: 1; } to { opacity: 0; scale: 1.16; } }
     @keyframes damage-rise { from { opacity: 0; transform: translate(-50%,8px) scale(.7); } 25% { opacity: 1; } to { opacity: 0; transform: translate(calc(-50% + 12px),-52px) scale(1.12); } }
     .ult-cast { position: absolute; z-index: 9; left: 50%; top: 15%; display: flex; align-items: center; gap: 8px; padding: 5px 14px 5px 5px; border-radius: 999px; background: rgba(13,11,35,.88); border: 1px solid rgba(255,217,118,.55); transform: translate(-50%,-50%) scale(.75); opacity: 0; pointer-events: none; transition: transform .25s ease, opacity .25s ease; }
     .ult-cast.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
@@ -832,6 +840,9 @@
     }
     .results-overlay.open { display: flex; animation: fade-in .3s ease both; }
     .results-panel { width: min(100%, 410px); max-height: 100%; overflow-y: auto; }
+    /* 100회 결과는 계속 스크롤할 수 있지만 스크롤바 자체는 노출하지 않는다. */
+    #resultsOverlay .results-panel { -ms-overflow-style: none; scrollbar-width: none; }
+    #resultsOverlay .results-panel::-webkit-scrollbar { width: 0; height: 0; display: none; }
     .results-title { margin-bottom: 15px; text-align: center; }
     .results-title small { color: var(--violet); font-weight: 900; letter-spacing: .17em; }
     .results-title h2 { margin: 4px 0 0; font-size: 27px; letter-spacing: -.045em; }

@@ -3,9 +3,9 @@
 // 성급 배율·합치기 비용·재화 강화 상한)는 절대 바꾸지 않는다.
 import {
   POOL, RARITY_BUDGET, ROLE_FRONT_PRIORITY, CHAPTER_ELEMENT,
-  heroRarityOf, heroRoleOf, heroElementOf, chapterOfStage
+  heroRarityOf, heroRoleOf, heroElementOf, chapterOfStage, HERO_ULTIMATE_SPEC
 } from './heroCatalog.js';
-import { roleCompletionMultiplier, elementAdvantageMultiplier, partyDominantElement } from './combatFormulas.js';
+import { roleCompletionMultiplier, heroElementMultiplier } from './combatFormulas.js';
 
 const SAVE_VERSION = 5;
 const SAVE_KEY = 'starlight-spirit-product-v1';
@@ -30,6 +30,15 @@ const BLUEPRINT_COST = { 2: 1, 3: 1, 4: 2, 5: 3 };
 // §05-5: 기존 데모 초기 파티(레전더리 3인+일반 2인, Lv1★1)로 역산해 이전 체감 전투력과 이어지게 맞춘 튜닝값.
 const PARTY_ATTACK_BASE = 2044.03;
 const PARTY_HP_BASE = 4175.37;
+const LEVEL_BAND = [0.55, 0.62, 0.70, 0.79, 0.89, 1.00];
+const ROLE_STAT_WEIGHTS = {
+  수호: { atk: 0.55, hp: 1.60, damage: 'phys' }, 전사: { atk: 1.05, hp: 1.30, damage: 'phys' },
+  사수: { atk: 1.45, hp: 0.65, damage: 'phys' }, 술사: { atk: 1.45, hp: 0.60, damage: 'mag' },
+  지원: { atk: 0.50, hp: 0.85, damage: 'mag' }
+};
+const ENEMY_RESIST = [{ phys: 1050, mag: 950 }, { phys: 1100, mag: 900 }, { phys: 900, mag: 1100 }, { phys: 850, mag: 1150 }, { phys: 1150, mag: 850 }];
+const HEAL_BUDGET_PER_SUPPORT = 300, SHIELD_BUDGET_PER_GUARDIAN = 180, SUPPORT_TICK_HEAL = 30, GUARDIAN_EHP_ESTIMATE = 70;
+const levelBandMul = level => LEVEL_BAND[Math.min(5, Math.floor((level - 1) / 10))];
 
 const BUILDING_BASE = {
   observatory: { wood: 100, stone: 60, starIron: 0 },
@@ -131,7 +140,10 @@ const INITIAL_BATTLE = {
   consecutiveLosses: 0,
   // 슬롯 0~4의 궁극기 준비까지 남은 틱. 0 이하면 준비 완료, 음수는 수동 모드에서 대기 중인
   // 유예 틱(-ULTIMATE_MANUAL_GRACE_TICKS에 닿으면 자동으로 발동).
-  ultimateCooldowns: [65, 52, 39, 26, 13]
+  ultimateCooldowns: [65, 52, 39, 26, 13],
+  slotShares: [200, 200, 200, 200, 200], atkFactor: 1000, ehpFactor: 1000,
+  healBudget: 0n, shieldBudget: 0n, shield: 0n, hot: null, dot: null,
+  buffTicks: 0, buffPct: 0, weakenTicks: 0, weakenPct: 0, reflectPct: 0
 };
 
 function cloneInitialState() {
@@ -211,6 +223,7 @@ export default class GameStore {
     this.#prepareReturnJournal();
     this.#rolloverIfNeeded();
     this.recomputePartyStats();
+    this.#resetBattleEffects(this.#battle);
   }
 
   get state() { return this.#state; }
@@ -382,7 +395,12 @@ export default class GameStore {
     if (!this.#state.tutorial.completed && this.hasFormedParty()) {
       this.#state.tutorial = { completed: true, step: 2 };
     }
+    if (!this.#state.growthFlags.levelBandCompensated && Object.keys(this.#state.heroes).length > 0) {
+      this.#state.materials.starPowder += 40000;
+      this.#state.growthFlags.levelBandCompensated = true;
+    }
     this.recomputePartyStats();
+    this.#resetBattleEffects(this.#battle);
   }
 
   loadLocalSave() {
@@ -651,25 +669,38 @@ export default class GameStore {
     const consecutiveBonus = this.#battle.consecutiveLosses >= 6 ? 1.08 : this.#battle.consecutiveLosses >= 3 ? 1.05 : 1;
     let attack = 0;
     let hp = 0;
-    for (const slot of this.#state.party) {
+    const contributions = [0, 0, 0, 0, 0];
+    const chapterIndex = chapterOfStage(this.#battle.stage);
+    const chapterElement = CHAPTER_ELEMENT[chapterIndex];
+    let supportContribution = 0, supportCount = 0, guardianCount = 0;
+    for (let i = 0; i < this.#state.party.length; i += 1) {
+      const slot = this.#state.party[i];
       if (!slot) continue; // 신규: 빈 슬롯 건너뜀
       const hero = this.#state.heroes[slot.name];
       if (!hero) continue;
       const rarity = heroRarityOf(slot.name);
       const budget = RARITY_BUDGET[rarity] ?? RARITY_BUDGET.common;
-      const levelMul = 1 + 0.01 * (hero.level - 1);
-      const hpLevelMul = 1 + 0.012 * (hero.level - 1);
+      const band = levelBandMul(hero.level);
+      const levelMul = (1 + 0.01 * (hero.level - 1)) * band;
+      const hpLevelMul = (1 + 0.012 * (hero.level - 1)) * band;
       const starMul = STAR_MULTIPLIERS[hero.star];
       const weaponMul = this.#weaponContribution(hero, stageType);
       const rowMul = slot.row === 'back' ? 1.05 : 1.0;
-      attack += budget * levelMul * starMul * (1 + weaponMul) * rowMul;
-      hp += budget * hpLevelMul * starMul;
+      const role = heroRoleOf(slot.name);
+      const weight = ROLE_STAT_WEIGHTS[role] || { atk: 1, hp: 1, damage: 'phys' };
+      let resist = ENEMY_RESIST[chapterIndex]?.[weight.damage] ?? 1000;
+      if (this.#stageType(this.#battle.stage) === 'boss') resist = 1000 + (resist - 1000) * 3 / 2;
+      const element = heroElementMultiplier(heroElementOf(slot.name), chapterElement) / 1000;
+      const contribution = budget * levelMul * starMul * (1 + weaponMul) * rowMul * weight.atk * element * (resist / 1000);
+      contributions[i] = contribution;
+      attack += contribution;
+      hp += budget * hpLevelMul * starMul * weight.hp;
+      if (role === '지원') { supportContribution += contribution; supportCount += 1; }
+      if (role === '수호') guardianCount += 1;
     }
     const memberNames = this.#state.party.filter(Boolean).map(s => s.name); // 변경: filter(Boolean) 추가
     const roleMul = roleCompletionMultiplier(memberNames);
-    const chapterElement = CHAPTER_ELEMENT[chapterOfStage(this.#battle.stage)];
-    const elementMul = elementAdvantageMultiplier(partyDominantElement(memberNames), chapterElement);
-    attack *= roleMul * elementMul * accountLevelMul;
+    attack *= roleMul * accountLevelMul;
     hp *= accountLevelMul; // 신규: 공격력과 동일하게 계정 레벨 보정을 HP에도 적용(비대칭 버그 수정)
     this.#battle.attack = BigInt(Math.max(1, Math.round(attack * PARTY_ATTACK_BASE)));
     const newMaxHp = BigInt(Math.max(1, Math.round(hp * PARTY_HP_BASE * consecutiveBonus)));
@@ -682,6 +713,21 @@ export default class GameStore {
     this.#battle.partyMaxHp = newMaxHp;
     if (wasEmpty && newMaxHp > 1n) this.#battle.partyHp = newMaxHp;
     else if (this.#battle.partyHp === undefined || this.#battle.partyHp > newMaxHp) this.#battle.partyHp = newMaxHp;
+    const filled = contributions.filter(v => v > 0).length;
+    const total = contributions.reduce((sum, value) => sum + value, 0);
+    this.#battle.slotShares = contributions.map(value => total > 0 ? Math.round(1000 * filled * value / total) : 0);
+    this.#battle.atkFactor = total > 0 ? Math.round(1000 * (1 - supportContribution / total)) : 0;
+    this.#battle.ehpFactor = 1000 + HEAL_BUDGET_PER_SUPPORT * supportCount + GUARDIAN_EHP_ESTIMATE * guardianCount;
+  }
+
+  #resetBattleEffects(b) {
+    const roles = this.#state.party.filter(Boolean).map(slot => heroRoleOf(slot.name));
+    const supports = roles.filter(role => role === '지원').length;
+    const guardians = roles.filter(role => role === '수호').length;
+    b.healBudget = (b.partyMaxHp * BigInt(HEAL_BUDGET_PER_SUPPORT * supports)) / 1000n;
+    b.shieldBudget = (b.partyMaxHp * BigInt(SHIELD_BUDGET_PER_GUARDIAN * guardians)) / 1000n;
+    b.shield = 0n; b.hot = null; b.dot = null;
+    b.buffTicks = 0; b.buffPct = 0; b.weakenTicks = 0; b.weakenPct = 0; b.reflectPct = 0;
   }
 
   /** 파티 5슬롯 중 하나라도 정령이 배치돼 있으면 true. performAutoAttack()과 adventureView.js의
@@ -706,7 +752,7 @@ export default class GameStore {
   }
 
   dpsValue() {
-    return (this.effectiveAttack() * 5n) / 4n;
+    return (this.effectiveAttack() * BigInt(this.#battle.atkFactor) * 5n) / 4000n;
   }
 
   /** 기존 90초-창 공식. 그대로 유지 — attemptBounty/attemptTower/attemptLabyrinthRoom/
@@ -715,12 +761,12 @@ export default class GameStore {
   #battleForecastWindow(enemyHpOverride) {
     const enemyHp = enemyHpOverride ?? this.#battle.enemyMaxHp;
     const attack = this.effectiveAttack();
-    const expectedDamage = attack * 5n * 90n;
+    const expectedDamage = (attack * BigInt(this.#battle.atkFactor)) / 1000n * 5n * 90n;
     const requiredDamage = (enemyHp * 105n) / 100n;
     const enemyAttackPerTick = enemyHp / 6000n;
     const expectedIncoming = enemyAttackPerTick * 112n;
     const survivalThreshold = (expectedIncoming * 110n) / 100n;
-    const partyMaxHp = this.#battle.partyMaxHp;
+    const partyMaxHp = (this.#battle.partyMaxHp * BigInt(this.#battle.ehpFactor)) / 1000n;
     let verdict;
     if (expectedDamage < requiredDamage) verdict = '공격력 부족';
     else if (partyMaxHp < survivalThreshold) verdict = '생존력 부족';
@@ -738,7 +784,8 @@ export default class GameStore {
     const RACE_TICK_CONST = 7080n; // 6000(초당 피증분 상수) × 1.18(기대 피해 배수, ×1000 스케일)
     const RACE_MARGIN_NUM = 110n;  // 배지가 "예상 승리"를 표시하려면 기댓값상 10% 여유를 요구한다.
     const RACE_MARGIN_DEN = 100n;  // (실전투 결과 자체를 바꾸지 않음 — 배지/사유 텍스트 전용 여유값)
-    const winProduct = attack * partyMaxHp * RACE_TICK_CONST;
+    const winProduct = (attack * BigInt(this.#battle.atkFactor)) / 1000n
+      * (partyMaxHp * BigInt(this.#battle.ehpFactor)) / 1000n * RACE_TICK_CONST;
     const requiredProduct = (enemyHp * enemyHp * RACE_MARGIN_NUM) / RACE_MARGIN_DEN;
     let verdict, attackGapPct = 0n, hpGapPct = 0n;
     if (attack <= 0n || partyMaxHp <= 0n) {
@@ -826,6 +873,7 @@ export default class GameStore {
     }
     b.enemyHp = b.enemyMaxHp;
     b.consecutiveLosses = 0;
+    this.#resetBattleEffects(b);
     this.#snapshotTierProgress();
     return { earnedReward, looped, isBoss: b.stage % 10 === 0 };
   }
@@ -835,14 +883,62 @@ export default class GameStore {
   #fireUltimate(b, slotIndex) {
     const heroName = this.#state.party[slotIndex]?.name;
     const hero = heroName ? this.#state.heroes[heroName] : null;
-    let bonus = (this.effectiveAttack() * 35n) / 10n;
-    if (hero && heroRarityOf(heroName) === 'legendary') {
-      const tenths = BigInt(LEGENDARY_ULTIMATE_BONUS_TENTHS[hero.star] ?? 10);
-      bonus = (bonus * tenths) / 10n;
+    const spec = HERO_ULTIMATE_SPEC[heroName] || { kind: 'damage', dmg: 35 };
+    const legendaryTenths = hero && heroRarityOf(heroName) === 'legendary'
+      ? LEGENDARY_ULTIMATE_BONUS_TENTHS[hero.star] ?? 10 : 10;
+    const scaled = value => Math.round((value || 0) * legendaryTenths / 10);
+    let dmgTenths = scaled(spec.dmg);
+    if (spec.missingHpDmg && b.enemyMaxHp > 0n) {
+      const missingPermille = Number(((b.enemyMaxHp - b.enemyHp) * 1000n) / b.enemyMaxHp);
+      dmgTenths += Math.round(scaled(spec.missingHpDmg) * missingPermille / 1000);
+    }
+    let bonus = (this.effectiveAttack() * BigInt(dmgTenths)) / 10n;
+    if (spec.guaranteedCritical) bonus *= 2n;
+    if (spec.pierce) {
+      let resist = ENEMY_RESIST[chapterOfStage(this.#battle.stage)]?.phys ?? 1000;
+      if (this.#stageType(this.#battle.stage) === 'boss') resist = 1000 + (resist - 1000) * 3 / 2;
+      if (resist > 0) bonus = (bonus * 1000n) / BigInt(Math.round(resist));
     }
     b.enemyHp -= bonus;
+    let healed = 0n, shielded = 0n;
+    const healWanted = (b.partyMaxHp * BigInt(scaled(spec.heal))) / 1000n;
+    if (healWanted > 0n && !spec.hotTicks) {
+      const available = healWanted < b.healBudget ? healWanted : b.healBudget;
+      healed = available < b.partyMaxHp - b.partyHp ? available : b.partyMaxHp - b.partyHp;
+      b.healBudget -= available;
+      b.partyHp += healed;
+      if (spec.overhealShield) {
+        const overflow = available - healed;
+        const cap = b.partyMaxHp / 10n;
+        shielded = overflow < cap ? overflow : cap;
+        b.shield += shielded;
+      }
+    } else if (healWanted > 0n && spec.hotTicks) {
+      const total = healWanted < b.healBudget ? healWanted : b.healBudget;
+      b.healBudget -= total;
+      const candidate = { ticks: spec.hotTicks, perTick: total / BigInt(spec.hotTicks) };
+      if (!b.hot || candidate.perTick * BigInt(candidate.ticks) > b.hot.perTick * BigInt(b.hot.ticks)) b.hot = candidate;
+    }
+    const shieldWanted = (b.partyMaxHp * BigInt(scaled(spec.shield))) / 1000n;
+    if (shieldWanted > 0n) {
+      shielded = shieldWanted < b.shieldBudget ? shieldWanted : b.shieldBudget;
+      b.shieldBudget -= shielded; b.shield += shielded;
+    }
+    const chooseTimed = (prefix, pct, ticks) => {
+      if (!pct || !ticks) return;
+      const p = scaled(pct), oldScore = (b[`${prefix}Pct`] || 0) * (b[`${prefix}Ticks`] || 0);
+      if (p * ticks > oldScore || (p * ticks === oldScore && ticks > b[`${prefix}Ticks`])) { b[`${prefix}Pct`] = p; b[`${prefix}Ticks`] = ticks; }
+    };
+    chooseTimed('buff', spec.buffPct, spec.buffTicks);
+    chooseTimed('weaken', spec.weakenPct, spec.weakenTicks);
+    if (spec.dotTenths && spec.dotTicks) {
+      const total = (this.effectiveAttack() * BigInt(scaled(spec.dotTenths))) / 10n;
+      const candidate = { ticks: spec.dotTicks, perTick: total / BigInt(spec.dotTicks) };
+      if (!b.dot || candidate.perTick * BigInt(candidate.ticks) > b.dot.perTick * BigInt(b.dot.ticks)) b.dot = candidate;
+    }
+    if (spec.reflectPct) b.reflectPct = Math.max(b.reflectPct || 0, scaled(spec.reflectPct));
     b.ultimateCooldowns[slotIndex] = ULTIMATE_COOLDOWN_TICKS;
-    return { slotIndex, heroName, bonus };
+    return { slotIndex, heroName, kind: spec.kind, bonus, healed, shielded, reflected: 0n, buffPct: scaled(spec.buffPct), weakenPct: scaled(spec.weakenPct) };
   }
 
   /** 궁극기 바에서 준비된(쿨타임 0 이하) 정령의 초상화를 직접 탭해 그 정령의 궁극기를 쏜다. */
@@ -901,6 +997,7 @@ export default class GameStore {
     this.#battle.elapsedMs = 0;
     this.#battle.partyHp = this.#battle.partyMaxHp; // 티어 전환 시 항상 풀피로 새 전투 시작
     this.recomputePartyStats();
+    this.#resetBattleEffects(this.#battle);
     return { ok: true, active: tier };
   }
 
@@ -979,6 +1076,7 @@ export default class GameStore {
     this.#battle.elapsedMs = 0;
     this.#battle.partyHp = this.#battle.partyMaxHp;
     this.#battle.enemyHp = this.#battle.enemyMaxHp;
+    this.#resetBattleEffects(this.#battle);
     this.#snapshotTierProgress();
     return {
       survivedSec, reasonText, consecutiveLosses: this.#battle.consecutiveLosses,
@@ -1000,19 +1098,40 @@ export default class GameStore {
       // (b===this.#battle인 메인 호출에서는 recomputePartyStats()가 이미 같은 클램프를 했으므로 이 두 줄은
       // 항상 no-op — 서브 배틀 호출에서만 실제로 의미가 있다.)
 
+    if (b.healBudget === undefined) this.#resetBattleEffects(b);
     const partySize = this.#state.party.length;
     const critical = Math.random() < 0.18;
     const variance = BigInt(90 + Math.floor(Math.random() * 21));
-    let damage = (attack * variance) / 100n;
-    if (critical) damage *= 2n;
-    b.enemyHp -= damage;
-    const attackerIndex = b.partyIndex % partySize;
-    b.partyIndex += 1;
+    let attackerIndex = b.partyIndex % partySize;
+    for (let k = 0; k < partySize && !this.#state.party[attackerIndex]; k += 1) attackerIndex = (attackerIndex + 1) % partySize;
+    b.partyIndex = attackerIndex + 1;
+    const role = heroRoleOf(this.#state.party[attackerIndex]?.name);
+    let damage = 0n, healed = 0n, reflected = 0n;
+    if (role === '지원') {
+      const wanted = (b.partyMaxHp * BigInt(SUPPORT_TICK_HEAL)) / 1000n;
+      const available = wanted < b.healBudget ? wanted : b.healBudget;
+      healed = available < b.partyMaxHp - b.partyHp ? available : b.partyMaxHp - b.partyHp;
+      b.healBudget -= available; b.partyHp += healed;
+    } else {
+      damage = (attack * BigInt(this.#battle.slotShares[attackerIndex] || 0)) / 1000n;
+      damage = (damage * variance) / 100n;
+      if (critical) damage *= 2n;
+      if (b.buffTicks > 0) damage = (damage * BigInt(1000 + b.buffPct)) / 1000n;
+      b.enemyHp -= damage;
+    }
+    if (b.dot?.ticks > 0) { b.enemyHp -= b.dot.perTick; b.dot.ticks -= 1; if (!b.dot.ticks) b.dot = null; }
+    if (b.hot?.ticks > 0) { const amount = b.hot.perTick < b.partyMaxHp - b.partyHp ? b.hot.perTick : b.partyMaxHp - b.partyHp; b.partyHp += amount; healed += amount; b.hot.ticks -= 1; if (!b.hot.ticks) b.hot = null; }
 
     const enemyAttackPerTick = b.enemyMaxHp / 6000n;
     const incomingVariance = BigInt(90 + Math.floor(Math.random() * 21));
-    const incoming = (enemyAttackPerTick * incomingVariance) / 100n;
+    let incoming = (enemyAttackPerTick * incomingVariance) / 100n;
+    if (b.weakenTicks > 0) incoming = (incoming * BigInt(1000 - b.weakenPct)) / 1000n;
+    let absorbed = 0n;
+    if (b.shield > 0n) { absorbed = incoming < b.shield ? incoming : b.shield; b.shield -= absorbed; incoming -= absorbed; }
+    if (absorbed > 0n && b.reflectPct > 0) { reflected = (absorbed * BigInt(b.reflectPct)) / 1000n; b.enemyHp -= reflected; }
     b.partyHp -= incoming;
+    if (b.buffTicks > 0) b.buffTicks -= 1;
+    if (b.weakenTicks > 0) b.weakenTicks -= 1;
     b.elapsedMs += 800;
 
     // 파티 5슬롯이 각자 자기 쿨타임으로 돌아가며 궁극기를 쏜다(자동 모드는 준비되는 즉시,
@@ -1029,7 +1148,7 @@ export default class GameStore {
         }
       }
     }
-    return { damage, critical, attackerIndex, incoming, ultimatesFired };
+    return { damage, healed, absorbed, reflected, critical, attackerIndex, incoming, damageType: ROLE_STAT_WEIGHTS[role]?.damage, ultimatesFired };
   }
 
   /** 0.8초(또는 2배속 시 0.4초) 전투 틱. */
@@ -1083,7 +1202,7 @@ export default class GameStore {
     const hero = this.#state.heroes[name];
     if (!hero) return 0;
     const budget = RARITY_BUDGET[heroRarityOf(name)] ?? RARITY_BUDGET.common;
-    return budget * STAR_MULTIPLIERS[hero.star] * (1 + 0.01 * (hero.level - 1));
+    return budget * STAR_MULTIPLIERS[hero.star] * (1 + 0.01 * (hero.level - 1)) * levelBandMul(hero.level);
   }
 
   #autoAssignRows(names) {
@@ -1932,6 +2051,7 @@ export default class GameStore {
       elapsedMs: 0, partyIndex: 0,
       ultimateCooldowns: this.#state.unlocked.ultimate ? [...INITIAL_BATTLE.ultimateCooldowns] : null
     };
+    this.#resetBattleEffects(this.#subBattle);
     return { ok: true, floor, enemyMaxHp };
   }
 
@@ -1965,6 +2085,7 @@ export default class GameStore {
       elapsedMs: 0, partyIndex: 0,
       ultimateCooldowns: this.#state.unlocked.ultimate ? [...INITIAL_BATTLE.ultimateCooldowns] : null
     };
+    this.#resetBattleEffects(this.#subBattle);
     return { ok: true, room: l.room };
   }
 
