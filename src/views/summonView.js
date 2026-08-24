@@ -1,11 +1,12 @@
 import { $, $$ } from '../dom/dom.js';
+import { POOL } from '../domain/heroCatalog.js';
 
 export function initSummonView({ store, toast, onPull }) {
   $$('.banner-tab').forEach(btn => btn.addEventListener('click', () => {
     if (btn.id === 'normalBanner') {
       $$('.banner-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      toast.show('일반 소환 배너로 전환했습니다 · 픽업 보장 없이 4명 중 균등 확률');
+      toast.show(`일반 소환 배너로 전환했습니다 · 픽업 보장 없이 ${POOL.legendary.length}명 중 균등 확률`);
     } else {
       $$('.banner-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
@@ -39,7 +40,7 @@ export function refreshSummonView(store) {
   $('#starBondCount').textContent = `보유 인연 ${s.starBond}`;
   const infoText = $('#pickupInfoText');
   if (activeBannerType() === 'normal') {
-    infoText.textContent = '일반 소환 · 픽업 보장 없이 레전더리 4명 중 균등 확률';
+    infoText.textContent = `일반 소환 · 픽업 보장 없이 레전더리 ${POOL.legendary.length}명 중 균등 확률`;
   } else if (s.pickupGuaranteed) {
     infoText.innerHTML = '<strong style="color:var(--gold)">다음 LEGENDARY는 픽업 확정!</strong>';
   } else {

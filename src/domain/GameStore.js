@@ -10,6 +10,13 @@ import { roleCompletionMultiplier, heroElementMultiplier } from './combatFormula
 const SAVE_VERSION = 5;
 const SAVE_KEY = 'starlight-spirit-product-v1';
 
+export const DAILY_MISSION_REWARD_LABEL = Object.freeze({
+  stageClears: '🪙 골드 200,000 · 계정 EXP 50',
+  heroLevelUp: '🪙 골드 200,000 · 계정 EXP 50 · ✨ 별가루 30',
+  summonOnce: '🪙 골드 200,000 · 계정 EXP 50 · 💎 보석 20'
+});
+export const WEEKLY_MISSION_REWARD_LABEL = '🤝 별의 인연 50 · 계정 EXP 100';
+
 const MERGE_COSTS = [0, 1, 2, 3, 5, 8];
 const STAR_MULTIPLIERS = [0, 1, 2, 4, 10, 35, 170]; // Number[] — recomputePartyStats()의 float 누산
   // 단계에서만 쓰이므로(최종에 BigInt(Math.round(...))) 타입 변경 없음.
@@ -53,7 +60,9 @@ const DEX_MILESTONES = {
   5: { starBond: 100 },
   10: { starBond: 200, gold: 5000000n },
   15: { starBond: 300 },
-  20: { starBond: 1000, memoryStars: 50 }
+  20: { starBond: 1000, memoryStars: 50 },
+  25: { starBond: 500, memoryStars: 25 },
+  30: { starBond: 1000, memoryStars: 50 }
 };
 
 const LABYRINTH_BUFFS = [
@@ -64,6 +73,17 @@ const LABYRINTH_BUFFS = [
 
 const EMPTY_PARTY = [null, null, null, null, null];
 const SLOT_DEFAULT_ROW = ['front', 'front', 'back', 'back', 'back']; // 인덱스 0~4 → 기본 전/후열
+
+function uniquePartySlots(rawParty, heroes = {}) {
+  const seen = new Set();
+  return Array.from({ length: 5 }, (_, index) => {
+    const slot = Array.isArray(rawParty) ? rawParty[index] : null;
+    const name = slot?.name;
+    if (!name || !(name in heroes) || seen.has(name)) return null;
+    seen.add(name);
+    return { name, row: slot.row === 'front' || slot.row === 'back' ? slot.row : SLOT_DEFAULT_ROW[index] };
+  });
+}
 
 function localDateKey(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -361,6 +381,12 @@ export default class GameStore {
       ,growthFlags: { ...base.growthFlags, ...(s.growthFlags || {}) }
       ,returnJournal: { ...base.returnJournal, ...(s.returnJournal || {}), progress: { ...(s.returnJournal?.progress || {}) } }
     };
+    // 과거 버전에서 허용되던 동일 정령 중복 편성을 로드 시점에 제거한다.
+    this.#state.party = uniquePartySlots(this.#state.party, this.#state.heroes);
+    this.#state.partyPresets = this.#state.partyPresets.slice(0, 3).map(preset => preset ? {
+      ...preset,
+      party: uniquePartySlots(preset.party, this.#state.heroes)
+    } : null);
     const savedCooldowns = data.battle.ultimateCooldowns;
     this.#battle = {
       ...INITIAL_BATTLE,
@@ -1232,16 +1258,18 @@ export default class GameStore {
   }
 
   #autoAssignRows(names) {
-    const withRole = names.map(name => ({ name, role: heroRoleOf(name) }));
+    const withRole = [...new Set(names)].map(name => ({ name, role: heroRoleOf(name) }));
     withRole.sort((a, b) => ROLE_FRONT_PRIORITY.indexOf(a.role) - ROLE_FRONT_PRIORITY.indexOf(b.role));
-    return withRole.map((h, i) => ({ name: h.name, row: i < 2 ? 'front' : 'back' }));
+    const party = withRole.slice(0, 5).map((h, i) => ({ name: h.name, row: i < 2 ? 'front' : 'back' }));
+    while (party.length < 5) party.push(null);
+    return party;
   }
 
   assignPartySlot(slotIndex, heroName) {
     if (!(heroName in this.#state.heroes)) return { ok: false, reason: 'not-owned' };
     const party = this.#state.party;
-    const countInParty = party.filter((s, i) => i !== slotIndex && s && s.name === heroName).length; // 변경: s && 추가
-    if (countInParty >= 2) return { ok: false, reason: 'max-copies' };
+    const alreadyDeployed = party.some((s, i) => i !== slotIndex && s?.name === heroName);
+    if (alreadyDeployed) return { ok: false, reason: 'duplicate-hero' };
     party[slotIndex] = { name: heroName, row: party[slotIndex]?.row || SLOT_DEFAULT_ROW[slotIndex] }; // 변경: 'back' 고정 → 인덱스별 기본열
     this.recomputePartyStats();
     this.#advanceTutorial(); // 신규(§3-4)
@@ -1277,7 +1305,6 @@ export default class GameStore {
       if (picks.length >= 5) break;
       picks.push(h.name);
     }
-    while (picks.length < 5 && picks.length > 0) picks.push(picks[0]);
     if (picks.length === 0) return { ok: false };
     this.#state.party = this.#autoAssignRows(picks.slice(0, 5));
     this.recomputePartyStats();
@@ -1292,7 +1319,6 @@ export default class GameStore {
       .sort((a, b) => b.invest - a.invest)
       .slice(0, 5)
       .map(h => h.name);
-    while (ranked.length < 5 && ranked.length > 0) ranked.push(ranked[0]);
     if (ranked.length === 0) return { ok: false };
     this.#state.party = this.#autoAssignRows(ranked);
     this.recomputePartyStats();
@@ -1307,7 +1333,7 @@ export default class GameStore {
   applyPreset(slotIndex) {
     const preset = this.#state.partyPresets[slotIndex];
     if (!preset) return { ok: false };
-    this.#state.party = preset.party.map(s => (s ? { ...s } : null)); // 변경: null 슬롯을 {}로 오염시키지 않고 그대로 보존
+    this.#state.party = uniquePartySlots(preset.party, this.#state.heroes);
     this.recomputePartyStats();
     this.#advanceTutorial(); // 신규
     return { ok: true };
@@ -2237,7 +2263,7 @@ export default class GameStore {
     this.#addAccountExp(50);
     if (key === 'summonOnce') this.#state.gems += 20n;
     if (key === 'heroLevelUp') this.#state.materials.starPowder += 30;
-    return { ok: true };
+    return { ok: true, rewardLabel: DAILY_MISSION_REWARD_LABEL[key] };
   }
 
   claimWeeklyMission(key) {
@@ -2246,7 +2272,7 @@ export default class GameStore {
     m.claimed = true;
     this.#addAccountExp(100);
     this.#state.starBond += 50;
-    return { ok: true };
+    return { ok: true, rewardLabel: WEEKLY_MISSION_REWARD_LABEL };
   }
 
   checkIn() {

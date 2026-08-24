@@ -1,6 +1,7 @@
 import { $ } from '../dom/dom.js';
 import { heroSdImagePath, RARITY_COLOR, heroRarityOf } from '../domain/heroCatalog.js';
 import { APP_VERSION, PATCH_NOTES } from '../domain/version.js';
+import { DAILY_MISSION_REWARD_LABEL, WEEKLY_MISSION_REWARD_LABEL } from '../domain/GameStore.js';
 
 let pendingProfileIcon = null; // 편집 중 임시 선택값. null = 기본 아이콘, 문자열이면 그 정령의 SD 초상화.
 
@@ -39,13 +40,14 @@ const WEEKLY_LABEL = {
   labyrinthRuns: '꿈의 미궁 완주 1회'
 };
 
-function missionRow(key, mission, label) {
+function missionRow(key, mission, label, rewardLabel) {
   const pct = Math.min(100, Math.round((mission.progress / mission.target) * 100));
   const canClaim = !mission.claimed && mission.progress >= mission.target;
   return `<div class="mission-item">
     <div class="mission-progress">
       <strong>${label}</strong>
       <span>${mission.progress} / ${mission.target}</span>
+      <div class="mission-reward">보상 · ${rewardLabel}</div>
       <div class="mission-track"><div class="mission-fill" style="width:${pct}%"></div></div>
     </div>
     <button class="mission-claim" data-mission-key="${key}" ${canClaim ? '' : 'disabled'}>${mission.claimed ? '완료' : '수령'}</button>
@@ -148,7 +150,7 @@ export function initMenuView({ store, toast, onChange }) {
     if (!btn) return;
     const result = store.claimDailyMission(btn.dataset.missionKey);
     if (!result.ok) return;
-    toast.show('일일 임무 보상을 수령했습니다.');
+    toast.show(`수령 완료 · ${result.rewardLabel}`);
     store.saveGame();
     onChange();
   });
@@ -157,7 +159,7 @@ export function initMenuView({ store, toast, onChange }) {
     if (!btn) return;
     const result = store.claimWeeklyMission(btn.dataset.missionKey);
     if (!result.ok) return;
-    toast.show('주간 임무 보상을 수령했습니다.');
+    toast.show(`수령 완료 · ${result.rewardLabel}`);
     store.saveGame();
     onChange();
   });
@@ -192,8 +194,8 @@ export function refreshMenuView(store) {
   const seasonDays = s.seasonTrack.cycleStart ? Math.floor((Date.now() - new Date(s.seasonTrack.cycleStart).getTime()) / 86400000) : 0;
   $('#seasonTrackInfo').textContent = `${s.seasonTrack.claimedTier} / 7 단계 수령 · 진행 ${seasonDays}일차`;
 
-  $('#dailyMissionList').innerHTML = Object.entries(s.missions.daily).map(([key, m]) => missionRow(key, m, DAILY_LABEL[key] || key)).join('');
-  $('#weeklyMissionList').innerHTML = Object.entries(s.missions.weekly).map(([key, m]) => missionRow(key, m, WEEKLY_LABEL[key] || key)).join('');
+  $('#dailyMissionList').innerHTML = Object.entries(s.missions.daily).map(([key, m]) => missionRow(key, m, DAILY_LABEL[key] || key, DAILY_MISSION_REWARD_LABEL[key])).join('');
+  $('#weeklyMissionList').innerHTML = Object.entries(s.missions.weekly).map(([key, m]) => missionRow(key, m, WEEKLY_LABEL[key] || key, WEEKLY_MISSION_REWARD_LABEL)).join('');
 
   $('#memoryStarInfo').textContent = `기억의 별 ${s.memoryStars}개 보유 — 최대 성급 정령의 중복 획득분으로 쌓입니다.`;
 }

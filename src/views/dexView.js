@@ -2,7 +2,7 @@ import { $ } from '../dom/dom.js';
 import { ALL_HEROES, RARITY_COLOR, heroSdImagePath } from '../domain/heroCatalog.js';
 
 const RARITY_TAG = { legendary: 'L', epic: 'E', rare: 'R', magic: 'M', common: 'C' };
-const MILESTONES = [5, 10, 15, 20];
+const MILESTONES = [5, 10, 15, 20, 25, 30];
 
 export function initDexView({ store, toast, onChange, openHeroDetail }) {
   $('#dexPanel').addEventListener('click', event => {

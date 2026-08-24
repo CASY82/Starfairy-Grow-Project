@@ -44,9 +44,13 @@ export function heroSdImagePath(name) {
   return `assets/images/${name}SD.png`;
 }
 
-export const WEAPON_OWNERS = ['루나리아', '이그니스', '실바나', '녹티스', '피로', '네레이', '솔레아', '아스트라', '코멧'];
+export const WEAPON_OWNERS = [
+  '루나리아', '이그니스', '실바나', '녹티스', '피로', '네레이', '솔레아', '아스트라', '코멧',
+  '마리나', '브램', '스파크', '듀', '리프', '글림', '애쉬', '버블', '클로버', '더스크', '모스',
+  '아우렐', '카르디아', '벨로아', '라비엘', '미레나', '오르핀', '플레르', '세이지', '페블', '미스트'
+];
 
-// §04-6: 전용 무기 아트가 없는 11종은 동일 등급 대표 정령의 무기 아트를 재사용한다.
+// 모든 정령은 전용 무기 아트를 보유한다. fallback은 손상되거나 누락된 저장 데이터의 안전망으로만 둔다.
 const WEAPON_ART_FALLBACK = { rare: '코멧', magic: '코멧', common: '코멧' };
 
 export function weaponImagePath(name) {
@@ -63,31 +67,41 @@ export const POOL = {
     { name: '루나리아', icon: '🌙', element: '달빛', role: '술사' },
     { name: '이그니스', icon: '🔥', element: '불꽃', role: '전사' },
     { name: '실바나', icon: '🌳', element: '숲', role: '지원' },
-    { name: '녹티스', icon: '🌌', element: '어둠', role: '사수' }
+    { name: '녹티스', icon: '🌌', element: '어둠', role: '사수' },
+    { name: '아우렐', icon: '🛡️', element: '빛', role: '수호' },
+    { name: '카르디아', icon: '🐉', element: '불꽃', role: '전사' }
   ],
   epic: [
     { name: '피로', icon: '🔥', element: '불꽃', role: '전사' },
     { name: '네레이', icon: '💧', element: '물결', role: '수호' },
     { name: '솔레아', icon: '☀️', element: '빛', role: '지원' },
-    { name: '아스트라', icon: '💫', element: '빛', role: '사수' }
+    { name: '아스트라', icon: '💫', element: '빛', role: '사수' },
+    { name: '벨로아', icon: '🌘', element: '어둠', role: '수호' },
+    { name: '라비엘', icon: '🔭', element: '빛', role: '술사' }
   ],
   rare: [
     { name: '코멧', icon: '☄️', element: '불꽃', role: '사수' },
     { name: '모스', icon: '🌿', element: '숲', role: '지원' },
     { name: '마리나', icon: '🐚', element: '물결', role: '술사' },
-    { name: '브램', icon: '🛡️', element: '어둠', role: '수호' }
+    { name: '브램', icon: '🛡️', element: '어둠', role: '수호' },
+    { name: '미레나', icon: '🏹', element: '물결', role: '사수' },
+    { name: '오르핀', icon: '🥊', element: '숲', role: '전사' }
   ],
   magic: [
     { name: '스파크', icon: '🔸', element: '불꽃', role: '사수' },
     { name: '듀', icon: '💠', element: '물결', role: '지원' },
     { name: '리프', icon: '🍃', element: '숲', role: '전사' },
-    { name: '글림', icon: '✧', element: '빛', role: '술사' }
+    { name: '글림', icon: '✧', element: '빛', role: '술사' },
+    { name: '플레르', icon: '🏮', element: '불꽃', role: '지원' },
+    { name: '세이지', icon: '🌰', element: '숲', role: '수호' }
   ],
   common: [
     { name: '애쉬', icon: '🗡️', element: '불꽃', role: '전사' },
     { name: '버블', icon: '🌊', element: '물결', role: '수호' },
     { name: '클로버', icon: '🍀', element: '숲', role: '지원' },
-    { name: '더스크', icon: '◆', element: '어둠', role: '사수' }
+    { name: '더스크', icon: '◆', element: '어둠', role: '사수' },
+    { name: '페블', icon: '🔨', element: '숲', role: '전사' },
+    { name: '미스트', icon: '🌫️', element: '물결', role: '술사' }
   ]
 };
 
@@ -135,7 +149,17 @@ export const HERO_VFX_PROFILES = Object.freeze({
   '애쉬': { basicPreset: 'ash-slash', ultimatePreset: 'cinder-cleave', glyph: 'ash-blade' },
   '버블': { basicPreset: 'bubble-wave', ultimatePreset: 'great-bubble', glyph: 'bubble' },
   '클로버': { basicPreset: 'clover-leaf', ultimatePreset: 'four-leaf-glow', glyph: 'clover' },
-  '더스크': { basicPreset: 'dusk-arrow', ultimatePreset: 'diamond-rift', glyph: 'rift-diamond' }
+  '더스크': { basicPreset: 'dusk-arrow', ultimatePreset: 'diamond-rift', glyph: 'rift-diamond' },
+  '아우렐': { basicPreset: 'solar-shield-bash', ultimatePreset: 'stellar-bastion', glyph: 'sun-shield' },
+  '카르디아': { basicPreset: 'dragon-flame-cleave', ultimatePreset: 'wyrmheart-charge', glyph: 'dragon-blade' },
+  '벨로아': { basicPreset: 'twilight-chain', ultimatePreset: 'eclipse-aegis', glyph: 'crescent-shield' },
+  '라비엘': { basicPreset: 'constellation-orb', ultimatePreset: 'astral-observatory', glyph: 'orbit-star' },
+  '미레나': { basicPreset: 'tidal-bolt', ultimatePreset: 'coral-tempest', glyph: 'coral-arrow' },
+  '오르핀': { basicPreset: 'root-punch', ultimatePreset: 'ancient-grove-fist', glyph: 'root-gauntlet' },
+  '플레르': { basicPreset: 'ember-lantern', ultimatePreset: 'hearthlight-festival', glyph: 'warm-lantern' },
+  '세이지': { basicPreset: 'acorn-thrust', ultimatePreset: 'evergreen-rampart', glyph: 'acorn-shield' },
+  '페블': { basicPreset: 'stone-hammer', ultimatePreset: 'quarry-breaker', glyph: 'rock-hammer' },
+  '미스트': { basicPreset: 'mist-bubble', ultimatePreset: 'silver-fog', glyph: 'mist-drop' }
 });
 
 const VFX_ELEMENT_KEY = { '불꽃': 'fire', '물결': 'water', '숲': 'forest', '빛': 'light', '어둠': 'dark', '달빛': 'moonlight' };
@@ -174,7 +198,17 @@ export const HERO_ULTIMATE_SPEC = Object.freeze({
   '솔레아': { kind: 'buff', dmg: 0, heal: 60, buffPct: 120, buffTicks: 20 },
   '모스': { kind: 'hot', dmg: 0, heal: 140, hotTicks: 10 },
   '듀': { kind: 'heal-shield', dmg: 0, heal: 100, shield: 30 },
-  '클로버': { kind: 'heal', dmg: 0, heal: 140 }
+  '클로버': { kind: 'heal', dmg: 0, heal: 140 },
+  '아우렐': { kind: 'reflect', dmg: 10, shield: 50, reflectPct: 220 },
+  '카르디아': { kind: 'damage', dmg: 38, missingHpDmg: 18 },
+  '벨로아': { kind: 'weaken', dmg: 10, shield: 45, weakenPct: 120, weakenTicks: 6 },
+  '라비엘': { kind: 'critical', dmg: 30, guaranteedCritical: true },
+  '미레나': { kind: 'pierce', dmg: 48, pierce: true },
+  '오르핀': { kind: 'buff', dmg: 42, buffPct: 18, buffTicks: 20 },
+  '플레르': { kind: 'hot', dmg: 0, heal: 135, hotTicks: 10 },
+  '세이지': { kind: 'shield', dmg: 18, shield: 45 },
+  '페블': { kind: 'damage', dmg: 45 },
+  '미스트': { kind: 'weaken', dmg: 44, weakenPct: 45, weakenTicks: 15 }
 });
 
 // §06-3 역할 완성도: 수호 > 전사 > 사수 > 술사 > 지원 순으로 전열 우선 배치(자동 편성용).

@@ -17,7 +17,7 @@ export function initPartyView({ store, toast, onChange }) {
     }
     const slotEl = event.target.closest('.party-slot');
     if (slotEl) {
-      openPicker(Number(slotEl.dataset.slot));
+      openPicker(store, Number(slotEl.dataset.slot));
       return;
     }
     const action = event.target.closest('button[data-party-action]')?.dataset.partyAction;
@@ -52,7 +52,7 @@ export function initPartyView({ store, toast, onChange }) {
     if (!item || pickerTargetSlot === null) return;
     const result = store.assignPartySlot(pickerTargetSlot, item.dataset.name);
     if (!result.ok) {
-      toast.show(result.reason === 'max-copies' ? '같은 정령은 최대 2명까지만 편성할 수 있어요.' : '편성할 수 없습니다.');
+      toast.show(result.reason === 'duplicate-hero' ? '같은 정령은 한 명만 편성할 수 있어요.' : '편성할 수 없습니다.');
       return;
     }
     closePicker();
@@ -62,13 +62,25 @@ export function initPartyView({ store, toast, onChange }) {
   $('#heroPickerSheet').addEventListener('click', e => { if (e.target.id === 'heroPickerSheet') closePicker(); });
 }
 
-function openPicker(slotIndex) {
+function openPicker(store, slotIndex) {
   pickerTargetSlot = slotIndex;
+  renderHeroPicker(store, slotIndex);
   $('#heroPickerSheet').classList.add('open');
 }
 function closePicker() {
   $('#heroPickerSheet').classList.remove('open');
   pickerTargetSlot = null;
+}
+
+function renderHeroPicker(store, targetSlot) {
+  $('#heroPickerGrid').innerHTML = Object.keys(store.state.heroes).map(name => {
+    const deployedElsewhere = store.state.party.some((slot, index) => index !== targetSlot && slot?.name === name);
+    return `<div class="hero-picker-item" data-name="${name}" data-disabled="${deployedElsewhere ? 1 : 0}"
+      aria-disabled="${deployedElsewhere}" style="border-color:${RARITY_COLOR[heroRarityOf(name)]};${deployedElsewhere ? 'opacity:.35;filter:grayscale(.65);pointer-events:none' : ''}">
+      <img src="${heroSdImagePath(name)}" alt="${name}">
+      ${deployedElsewhere ? '<small style="display:block;font-size:8px;color:var(--muted)">편성 중</small>' : ''}
+    </div>`;
+  }).join('') || '<p style="color:var(--muted);font-size:11px">아직 보유한 정령이 없습니다.</p>';
 }
 
 function slotMarkup(store, slot, index) {
@@ -101,7 +113,7 @@ export function refreshPartyView(store) {
         <div class="party-slots back">${back.map(x => slotMarkup(store, x.slot, x.i)).join('')}</div>
       </div>
     </div>
-    <p style="margin:10px 2px 0;color:var(--muted);font-size:9.5px">슬롯을 탭해서 정령을 배치하고, 배치된 슬롯을 다시 탭하면 전열/후열이 바뀝니다. 동일 정령은 최대 2명까지 편성할 수 있어요.</p>
+    <p style="margin:10px 2px 0;color:var(--muted);font-size:9.5px">슬롯을 탭해서 정령을 배치하고, 우측 상단 ⇅ 버튼으로 전열/후열을 바꿀 수 있습니다. 동일 정령은 한 명만 편성할 수 있어요.</p>
     <div class="party-quick-actions">
       <button data-party-action="auto-legendary">레전더리 추천</button>
       <button data-party-action="auto-growth">무과금 성장 추천</button>
@@ -114,9 +126,5 @@ export function refreshPartyView(store) {
     </div>
   `;
 
-  $('#heroPickerGrid').innerHTML = Object.keys(store.state.heroes).map(name => `
-    <div class="hero-picker-item" data-name="${name}" style="border-color:${RARITY_COLOR[heroRarityOf(name)]}">
-      <img src="${heroSdImagePath(name)}" alt="${name}">
-    </div>
-  `).join('') || '<p style="color:var(--muted);font-size:11px">아직 보유한 정령이 없습니다.</p>';
+  if (pickerTargetSlot !== null) renderHeroPicker(store, pickerTargetSlot);
 }
