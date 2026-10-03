@@ -84,7 +84,7 @@ function renderParty(store) {
   const unitHtml = (slot, index) => `
     <div class="unit" data-slot-index="${index}" title="${slot.name}"><img src="${heroSdImagePath(slot.name)}" alt="${slot.name}"></div>
   `;
-  const indexed = store.state.party.map((slot, index) => ({ slot, index })).filter(x => x.slot); // 변경: .filter(x => x.slot) 추가
+  const indexed = (store.subBattle?.combat?.party || store.state.party).map((slot, index) => ({ slot, index })).filter(x => x.slot); // 변경: .filter(x => x.slot) 추가
   const back = indexed.filter(s => s.slot.row !== 'front');
   const front = indexed.filter(s => s.slot.row === 'front');
   $('#partyRow').innerHTML = `
@@ -412,7 +412,7 @@ export function tickAdventure(store, toast) {
   if (!result) { refreshAdventureView(store); return; } // 방어: 위 게이트를 우회해 도달해도 안전
   const enemySprite = $('#enemySprite');
   const attacker = $(`.unit[data-slot-index="${result.attackerIndex}"]`);
-  const attackerName = store.state.party[result.attackerIndex]?.name;
+  const attackerName = (store.subBattle?.combat?.party || store.state.party)[result.attackerIndex]?.name;
   const isMeleeAttacker = ['수호', '전사'].includes(heroRoleOf(attackerName));
   if (attacker && isMeleeAttacker) {
     const scene = $('#battleScene');
@@ -448,7 +448,7 @@ function tickSubBattle(store, toast) {
   if (!result) { refreshAdventureView(store); return undefined; }
   const enemySprite = $('#enemySprite');
   const attacker = $(`.unit[data-slot-index="${result.attackerIndex}"]`);
-  const attackerName = store.state.party[result.attackerIndex]?.name;
+  const attackerName = (store.subBattle?.combat?.party || store.state.party)[result.attackerIndex]?.name;
   const isMeleeAttacker = ['수호', '전사'].includes(heroRoleOf(attackerName));
   if (attacker && isMeleeAttacker) {
     const scene = $('#battleScene');
@@ -577,12 +577,12 @@ function renderNoPartyState(store) {
 
 export function refreshAdventureView(store) {
   const page = document.querySelector('[data-page="adventure"]');
-  const formed = store.hasFormedParty();
+  const formed = !!store.subBattle?.combat || store.hasFormedParty();
   page?.classList.toggle('no-party-mode', !formed); // 신규
   if (!formed) { renderNoPartyState(store); return; } // 신규 — sub-battle-mode 분기보다 먼저 검사
   const sub = store.subBattle;
   page?.classList.toggle('sub-battle-mode', !!sub);
-  if (sub) { renderSubBattleHud(store); return; }
+  if (sub) { renderParty(store); renderSubBattleHud(store); return; }
   const b = store.battle;
   // renderSubBattleHud()가 이 두 라벨을 "별자리 탑"/""로 덮어쓰므로, 서브 배틀이 끝나고 메인
   // 스테이지로 돌아온 뒤에는(정상 경로) 매번 기본값으로 되돌려야 한다.

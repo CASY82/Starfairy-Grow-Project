@@ -7,7 +7,9 @@ import {
 } from './heroCatalog.js';
 import { roleCompletionMultiplier, heroElementMultiplier } from './combatFormulas.js';
 
-const SAVE_VERSION = 5;
+import { RELICS, relicEffects, LESSONS, LOAN_HEROES, EPISODES, DISCOVERIES, WEEKLY_RULES, lessonSatisfied, newContentState, normalizeContentState } from './contentCatalog.js';
+
+const SAVE_VERSION = 6;
 const SAVE_KEY = 'starlight-spirit-product-v1';
 
 export const DAILY_MISSION_REWARD_LABEL = Object.freeze({
@@ -65,11 +67,7 @@ const DEX_MILESTONES = {
   30: { starBond: 1000, memoryStars: 50 }
 };
 
-const LABYRINTH_BUFFS = [
-  { id: 'frontAtk', label: '전열 공격 +15%' },
-  { id: 'ultimateCharge', label: '궁극기 게이지 +20% 충전 속도' },
-  { id: 'elementBonus', label: '속성 상성 보정 +5%p' }
-];
+const LABYRINTH_BUFFS = RELICS;
 
 const EMPTY_PARTY = [null, null, null, null, null];
 const SLOT_DEFAULT_ROW = ['front', 'front', 'back', 'back', 'back']; // 인덱스 0~4 → 기본 전/후열
@@ -168,6 +166,7 @@ const INITIAL_BATTLE = {
 
 function cloneInitialState() {
   return {
+    content: newContentState(),
     gems: 10000000n, // 테스트 빌드용: 소환을 넉넉히 테스트할 수 있게 높게 잡음
     gold: 3000000n,
     pity: 0,
@@ -233,6 +232,8 @@ export default class GameStore {
   // { mode: 'tower'|'labyrinth', enemyHp, enemyMaxHp, partyHp, partyMaxHp (bigint),
   //   elapsedMs, partyIndex (number), ultimateCooldowns: number[5]|null,
   //   floor (tower만), room/pendingBuffId (labyrinth만) }
+  #contentBattle = null;
+  #contentResult = null;
   #subBattle = null;
   #currentResults = [];
   #busy = false;
@@ -248,6 +249,8 @@ export default class GameStore {
 
   get state() { return this.#state; }
   get battle() { return this.#battle; }
+  get contentBattle() { return this.#contentBattle; }
+  get contentResult() { return this.#contentResult; }
   get subBattle() { return this.#subBattle; }
   get busy() { return this.#busy; }
   set busy(value) { this.#busy = value; }
@@ -339,6 +342,7 @@ export default class GameStore {
     this.#state = {
       ...base,
       ...s,
+      content: normalizeContentState(s.content),
       materials: { ...base.materials, ...(s.materials || {}) },
       account: { ...base.account, ...(s.account || {}) },
       heroes: { ...base.heroes, ...(s.heroes || {}) },
@@ -382,11 +386,22 @@ export default class GameStore {
       ,returnJournal: { ...base.returnJournal, ...(s.returnJournal || {}), progress: { ...(s.returnJournal?.progress || {}) } }
     };
     // 과거 버전에서 허용되던 동일 정령 중복 편성을 로드 시점에 제거한다.
+    const labyrinth = this.#state.labyrinth;
+    labyrinth.buffs = [...new Set(Array.isArray(labyrinth.buffs) ? labyrinth.buffs.filter(id => RELICS.some(r => r.id === id)) : [])].slice(0, 5);
+    labyrinth.room = Number.isInteger(labyrinth.room) ? Math.max(0, Math.min(5, labyrinth.room)) : 0;
+    labyrinth.practice = labyrinth.practice === true;
+    labyrinth.active = labyrinth.active === true && labyrinth.room < 5;
+    if (Array.isArray(labyrinth.choices)) labyrinth.choices = [...new Set(labyrinth.choices.filter(id => RELICS.some(r => r.id === id) && !labyrinth.buffs.includes(id)))].slice(0, 3);
+    else delete labyrinth.choices;
     this.#state.party = uniquePartySlots(this.#state.party, this.#state.heroes);
     this.#state.partyPresets = this.#state.partyPresets.slice(0, 3).map(preset => preset ? {
       ...preset,
       party: uniquePartySlots(preset.party, this.#state.heroes)
     } : null);
+    const content = this.#state.content;
+    if (content.theme === 'forest' && !content.completed.includes('side')) content.theme = 'night';
+    content.decorationSlots = content.decorationSlots.map(id => this.availableDecorations().includes(id) ? id : null);
+    if (!this.#state.heroes[content.representative]) content.representative = null;
     const savedCooldowns = data.battle.ultimateCooldowns;
     this.#battle = {
       ...INITIAL_BATTLE,
@@ -396,6 +411,9 @@ export default class GameStore {
         : [...INITIAL_BATTLE.ultimateCooldowns]
     };
     this.#currentResults = [];
+    this.#contentBattle = null;
+    this.#contentResult = null;
+    this.#subBattle = null;
     this.#rolloverIfNeeded();
     // v4→v5 마이그레이션으로 difficultyTier가 normal로 바뀌었는데 tierProgress.normal이 아직
     // 비어있다면(=새로 생긴 티어), #battle을 normal의 1스테이지 앵커로 다시 맞춘다. 신규 게임이나
@@ -474,6 +492,8 @@ export default class GameStore {
     this.#battle = { ...INITIAL_BATTLE, ultimateCooldowns: [...INITIAL_BATTLE.ultimateCooldowns] };
     this.#subBattle = null;
     this.#currentResults = [];
+    this.#contentBattle = null;
+    this.#contentResult = null;
     localStorage.removeItem(SAVE_KEY);
     this.#rolloverIfNeeded();
     this.recomputePartyStats();
@@ -497,6 +517,7 @@ export default class GameStore {
     }
     const week = localWeekKey();
     if (this.#state.weeklyResetKey !== week) {
+      if (this.#subBattle?.mode === 'labyrinth') this.#subBattle = null;
       this.#state.weeklyResetKey = week;
       this.#state.missions.weekly = defaultWeeklyMissions();
       this.#state.dungeons.sanctuary.usesWeek = 3;
@@ -773,7 +794,7 @@ export default class GameStore {
   }
 
   #resetBattleEffects(b) {
-    const roles = this.#state.party.filter(Boolean).map(slot => heroRoleOf(slot.name));
+    const roles = (b.combat?.party || this.#state.party).filter(Boolean).map(slot => heroRoleOf(slot.name));
     const supports = roles.filter(role => role === '지원').length;
     const guardians = roles.filter(role => role === '수호').length;
     b.healBudget = (b.partyMaxHp * BigInt(HEAL_BUDGET_PER_SUPPORT * supports)) / 1000n;
@@ -933,8 +954,8 @@ export default class GameStore {
   /** b(임의의 "배틀 형" 객체 — this.#battle 또는 this.#subBattle) 안에서 slotIndex 자리의
    * 정령이 궁극기를 쏜다. 초상화/이름은 호출부에서 state.party[slotIndex]로 표시한다. */
   #fireUltimate(b, slotIndex) {
-    const heroName = this.#state.party[slotIndex]?.name;
-    const hero = heroName ? this.#state.heroes[heroName] : null;
+    const heroName = (b.combat?.party || this.#state.party)[slotIndex]?.name;
+    const hero = heroName ? (b.combat?.heroes || this.#state.heroes)[heroName] : null;
     const spec = HERO_ULTIMATE_SPEC[heroName] || { kind: 'damage', dmg: 35 };
     const legendaryTenths = hero && heroRarityOf(heroName) === 'legendary'
       ? LEGENDARY_ULTIMATE_BONUS_TENTHS[hero.star] ?? 10 : 10;
@@ -944,13 +965,14 @@ export default class GameStore {
       const missingPermille = Number(((b.enemyMaxHp - b.enemyHp) * 1000n) / b.enemyMaxHp);
       dmgTenths += Math.round(scaled(spec.missingHpDmg) * missingPermille / 1000);
     }
-    let bonus = (this.effectiveAttack() * BigInt(dmgTenths)) / 10n;
+    let bonus = ((b.combat?.attack ?? this.effectiveAttack()) * BigInt(dmgTenths)) / 10n;
     if (spec.guaranteedCritical) bonus *= 2n;
     if (spec.pierce) {
-      let resist = ENEMY_RESIST[chapterOfStage(this.#battle.stage)]?.phys ?? 1000;
-      if (this.#stageType(this.#battle.stage) === 'boss') resist = 1000 + (resist - 1000) * 3 / 2;
+      let resist = ENEMY_RESIST[chapterOfStage(b.combat?.stage ?? this.#battle.stage)]?.phys ?? 1000;
+      if (this.#stageType(b.combat?.stage ?? this.#battle.stage) === 'boss') resist = 1000 + (resist - 1000) * 3 / 2;
       if (resist > 0) bonus = (bonus * 1000n) / BigInt(Math.round(resist));
     }
+    bonus = bonus * BigInt(b.resist?.[ROLE_STAT_WEIGHTS[heroRoleOf(heroName)]?.damage] ?? 1000) / 1000n;
     b.enemyHp -= bonus;
     let healed = 0n, shielded = 0n;
     const healWanted = (b.partyMaxHp * BigInt(scaled(spec.heal))) / 1000n;
@@ -984,17 +1006,18 @@ export default class GameStore {
     chooseTimed('buff', spec.buffPct, spec.buffTicks);
     chooseTimed('weaken', spec.weakenPct, spec.weakenTicks);
     if (spec.dotTenths && spec.dotTicks) {
-      const total = (this.effectiveAttack() * BigInt(scaled(spec.dotTenths))) / 10n;
-      const candidate = { ticks: spec.dotTicks, perTick: total / BigInt(spec.dotTicks) };
+      const total = ((b.combat?.attack ?? this.effectiveAttack()) * BigInt(scaled(spec.dotTenths))) / 10n;
+      const candidate = { ticks: spec.dotTicks, perTick: total * BigInt(b.resist?.[ROLE_STAT_WEIGHTS[heroRoleOf(heroName)]?.damage] ?? 1000) / 1000n / BigInt(spec.dotTicks) };
       if (!b.dot || candidate.perTick * BigInt(candidate.ticks) > b.dot.perTick * BigInt(b.dot.ticks)) b.dot = candidate;
     }
     if (spec.reflectPct) b.reflectPct = Math.max(b.reflectPct || 0, scaled(spec.reflectPct));
-    b.ultimateCooldowns[slotIndex] = ULTIMATE_COOLDOWN_TICKS;
+    b.ultimateCooldowns[slotIndex] = ULTIMATE_COOLDOWN_TICKS - (b.relics?.cooldown || 0);
     return { slotIndex, heroName, kind: spec.kind, bonus, healed, shielded, reflected: 0n, buffPct: scaled(spec.buffPct), weakenPct: scaled(spec.weakenPct) };
   }
 
   /** 궁극기 바에서 준비된(쿨타임 0 이하) 정령의 초상화를 직접 탭해 그 정령의 궁극기를 쏜다. */
   fireUltimateForSlot(slotIndex) {
+    if (this.#contentBattle || this.#subBattle || !this.#state.party[slotIndex]) return { ok: false };
     if (!this.#state.unlocked.ultimate) return { ok: false };
     if ((this.#battle.ultimateCooldowns[slotIndex] ?? 1) > 0) return { ok: false };
     const fired = this.#fireUltimate(this.#battle, slotIndex);
@@ -1144,20 +1167,21 @@ export default class GameStore {
    * attack을 캐시하지 않는다(this.#battle.attack 필드는 "업그레이드 보너스 적용 전 베이스
    * 공격력"이라는 기존 의미를 그대로 유지해야 하므로 오염시키지 않는다). */
   #tickBattleState(b) {
-    const attack = this.effectiveAttack(); // 내부에서 recomputePartyStats() 재호출 → this.#battle.attack/partyMaxHp 갱신
-    b.partyMaxHp = this.#battle.partyMaxHp; // 서브 배틀도 같은 5인 편성 스탯을 그대로 공유한다
+    const attack = b.combat?.attack ?? this.effectiveAttack();
+    b.partyMaxHp = b.combat?.partyMaxHp ?? this.#battle.partyMaxHp;
     if (b.partyHp > b.partyMaxHp) b.partyHp = b.partyMaxHp; // 메인 배틀과 동일한 "깎이기만, 회복 없음" 클램프
       // (b===this.#battle인 메인 호출에서는 recomputePartyStats()가 이미 같은 클램프를 했으므로 이 두 줄은
       // 항상 no-op — 서브 배틀 호출에서만 실제로 의미가 있다.)
 
     if (b.healBudget === undefined) this.#resetBattleEffects(b);
-    const partySize = this.#state.party.length;
+    const party = b.combat?.party || this.#state.party;
+    const partySize = party.length;
     const critical = Math.random() < 0.18;
     const variance = BigInt(90 + Math.floor(Math.random() * 21));
     let attackerIndex = b.partyIndex % partySize;
-    for (let k = 0; k < partySize && !this.#state.party[attackerIndex]; k += 1) attackerIndex = (attackerIndex + 1) % partySize;
+    for (let k = 0; k < partySize && !party[attackerIndex]; k += 1) attackerIndex = (attackerIndex + 1) % partySize;
     b.partyIndex = attackerIndex + 1;
-    const role = heroRoleOf(this.#state.party[attackerIndex]?.name);
+    const role = heroRoleOf(party[attackerIndex]?.name);
     let damage = 0n, healed = 0n, reflected = 0n;
     if (role === '지원') {
       const wanted = (b.partyMaxHp * BigInt(SUPPORT_TICK_HEAL)) / 1000n;
@@ -1165,7 +1189,9 @@ export default class GameStore {
       healed = available < b.partyMaxHp - b.partyHp ? available : b.partyMaxHp - b.partyHp;
       b.healBudget -= available; b.partyHp += healed;
     } else {
-      damage = (attack * BigInt(this.#battle.slotShares[attackerIndex] || 0)) / 1000n;
+      damage = (attack * BigInt((b.combat?.slotShares || this.#battle.slotShares)[attackerIndex] || 0)) / 1000n;
+      damage = damage * BigInt(1000 + (b.relics?.attack || 0) + (party[attackerIndex]?.row === 'front' ? b.relics?.front || 0 : 0)) / 1000n;
+      damage = damage * BigInt(b.resist?.[ROLE_STAT_WEIGHTS[role]?.damage] ?? 1000) / 1000n;
       damage = (damage * variance) / 100n;
       if (critical) damage *= 2n;
       if (b.buffTicks > 0) damage = (damage * BigInt(1000 + b.buffPct)) / 1000n;
@@ -1177,6 +1203,7 @@ export default class GameStore {
     const enemyAttackPerTick = b.enemyMaxHp / 6000n;
     const incomingVariance = BigInt(90 + Math.floor(Math.random() * 21));
     let incoming = (enemyAttackPerTick * incomingVariance) / 100n;
+    incoming = incoming * BigInt(1000 - (b.relics?.guard || 0)) / 1000n;
     if (b.weakenTicks > 0) incoming = (incoming * BigInt(1000 - b.weakenPct)) / 1000n;
     let absorbed = 0n;
     if (b.shield > 0n) { absorbed = incoming < b.shield ? incoming : b.shield; b.shield -= absorbed; incoming -= absorbed; }
@@ -1190,12 +1217,12 @@ export default class GameStore {
     // 수동 모드는 준비 후 ULTIMATE_MANUAL_GRACE_TICKS틱 동안 플레이어의 탭을 기다렸다가 그래도
     // 안 누르면 자동 발동). 한 틱에 여러 슬롯이 동시에 준비될 수도 있어 배열로 모은다.
     const ultimatesFired = [];
-    if (this.#state.unlocked.ultimate && b.ultimateCooldowns) {
+    if ((b.combat?.ultimate ?? this.#state.unlocked.ultimate) && b.ultimateCooldowns) {
       const cds = b.ultimateCooldowns;
       for (let i = 0; i < cds.length; i++) cds[i] -= 1;
       for (let i = 0; i < cds.length; i++) {
-        if (cds[i] > 0) continue;
-        if (this.#state.ultimateMode === 'auto' || cds[i] <= -ULTIMATE_MANUAL_GRACE_TICKS) {
+        if (cds[i] > 0 || !party[i]) continue;
+        if ((b.combat?.ultimateMode ?? this.#state.ultimateMode) === 'auto' || cds[i] <= -ULTIMATE_MANUAL_GRACE_TICKS) {
           ultimatesFired.push(this.#fireUltimate(b, i));
         }
       }
@@ -1205,7 +1232,7 @@ export default class GameStore {
 
   /** 0.8초(또는 2배속 시 0.4초) 전투 틱. */
   performAutoAttack() {
-    if (!this.hasFormedParty()) return null; // 신규(§3-2)
+    if (this.#contentBattle || this.#subBattle || !this.hasFormedParty()) return null; // 신규(§3-2)
     const result = this.#tickBattleState(this.#battle);
     let killResult = null;
     let defeatInfo = null;
@@ -1898,6 +1925,7 @@ export default class GameStore {
     if (reward.starIron && d.type === 'forge') daily.starIronClaimsToday += 1;
     d.claimed = true;
     this.#state.dispatch.slots[slot] = null;
+    this.#state.content.dispatches += 1;
     this.#journalProgress('dispatch', 1);
     this.saveGame();
     return { ok: true, reward, type: d.type };
@@ -2090,7 +2118,8 @@ export default class GameStore {
    * 이후 tickAdventure()가 매 0.8초(2배속 0.4초)마다 tickSubBattle()을 호출해 실제로 겨룬다. */
   startTowerBattle() {
     if (!this.#state.unlocked.tower) return { ok: false, reason: 'locked' };
-    if (this.#subBattle) return { ok: false, reason: 'busy' };
+    if (this.#subBattle || this.#contentBattle) return { ok: false, reason: 'busy' };
+    if (!this.hasFormedParty()) return { ok: false, reason: 'party' };
     const floor = this.#state.tower.floor;
     const requirement = this.towerPartyRequirement(floor);
     const matchingRoles = this.#state.party.filter(slot => slot && heroRoleOf(slot.name) === requirement.role).length;
@@ -2111,28 +2140,39 @@ export default class GameStore {
   }
 
   // -------------------------------------------------------------- 꿈의 미궁
-  startLabyrinth() {
+  startLabyrinth({ practice = false } = {}) {
+    this.#rolloverIfNeeded();
+    if (this.#subBattle || this.#contentBattle || this.#state.labyrinth.active) return { ok: false, reason: 'busy' };
     if (!this.#state.unlocked.labyrinth) return { ok: false, reason: 'locked' };
-    if (this.#state.labyrinth.weeklyDone) return { ok: false, reason: 'done' };
-    this.#state.labyrinth = { active: true, room: 0, buffs: [], weeklyDone: false };
+    if (this.#state.labyrinth.weeklyDone && !practice) return { ok: false, reason: 'done' };
+    this.#state.labyrinth = { active: true, room: 0, buffs: [], weeklyDone: this.#state.labyrinth.weeklyDone, practice, runWeek: localWeekKey(), enemyHp: this.#statsAtStage(40).hp };
+    this.saveGame();
     return { ok: true };
   }
 
   labyrinthBuffChoices() {
-    return [...LABYRINTH_BUFFS].sort(() => Math.random() - 0.5).slice(0, 3);
+    const l = this.#state.labyrinth;
+    if (!l.active) return [];
+    if (!Array.isArray(l.choices)) {
+      const pool = LABYRINTH_BUFFS.filter(r => !l.buffs.includes(r.id));
+      for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+      l.choices = pool.slice(0, 3).map(r => r.id); this.saveGame();
+    }
+    return LABYRINTH_BUFFS.filter(r => l.choices.includes(r.id));
   }
 
   /** 미궁 런이 활성 상태일 때 현재 room(state.labyrinth.room, 0-indexed)의 라이브 전투를
-   * 시작한다. chosenBuffId는 이번 방 승리 시 커밋될 버프 카드(현재도 비기능, 이 phase에서도
-   * 비기능 유지 — 장식용 기록만 한다). */
+   * 시작한다. chosenBuffId는 현재 방부터 적용되며 승리 후 보유 목록에 커밋된다. 유물 효과와 파티 능력치는 본편과 분리된다. */
   startLabyrinthBattle(chosenBuffId = null) {
+    this.#rolloverIfNeeded();
     const l = this.#state.labyrinth;
     if (!l.active) return { ok: false, reason: 'inactive' };
-    if (this.#subBattle) return { ok: false, reason: 'busy' };
+    if (this.#subBattle || this.#contentBattle) return { ok: false, reason: 'busy' };
+    if (!this.hasFormedParty()) return { ok: false, reason: 'party' };
+    if (chosenBuffId && !this.labyrinthBuffChoices().some(r => r.id === chosenBuffId)) return { ok: false, reason: 'choice' };
     this.recomputePartyStats();
-    // 기존 attemptLabyrinthRoom()과 동일한 근거로 "현재 메인 스테이지의 enemyMaxHp"를 이번 방의
-    // 목표 체력으로 스냅샷한다(새 수치 공식을 만들지 않는다).
-    const enemyMaxHp = this.#battle.enemyMaxHp;
+    // 쉬움 40단계 기준으로 고정한다. 본편 난이도/진행 변경으로 우회할 수 없다.
+    const enemyMaxHp = typeof l.enemyHp === 'bigint' && l.enemyHp > 0n ? l.enemyHp : this.#statsAtStage(40).hp;
     this.#subBattle = {
       mode: 'labyrinth', room: l.room, pendingBuffId: chosenBuffId || null,
       enemyHp: enemyMaxHp, enemyMaxHp,
@@ -2140,7 +2180,13 @@ export default class GameStore {
       elapsedMs: 0, partyIndex: 0,
       ultimateCooldowns: this.#state.unlocked.ultimate ? [...INITIAL_BATTLE.ultimateCooldowns] : null
     };
-    this.#resetBattleEffects(this.#subBattle);
+    const b = this.#subBattle;
+    b.combat = this.#captureContentParty(this.#state.party, 40);
+    b.partyMaxHp = b.combat.partyMaxHp; b.partyHp = b.partyMaxHp;
+    this.#resetBattleEffects(b);
+    b.relics = relicEffects([...l.buffs, chosenBuffId].filter(Boolean));
+    b.healBudget += b.partyMaxHp * BigInt(b.relics.heal) / 1000n;
+    b.shield = b.partyMaxHp * BigInt(b.relics.shield) / 1000n;
     return { ok: true, room: l.room };
   }
 
@@ -2148,12 +2194,13 @@ export default class GameStore {
    * (기존 attemptLabyrinthRoom() 패배 분기와 완전히 같은 보상 공식 — room×40). room 0에서 호출하면
    * 보상 0으로 종료된다(뷰에서 이 경우 버튼 자체를 숨긴다). */
   bankLabyrinthProgress() {
+    this.#rolloverIfNeeded();
     const l = this.#state.labyrinth;
     if (!l.active) return { ok: false, reason: 'inactive' };
-    if (this.#subBattle) return { ok: false, reason: 'busy' };
+    if (this.#subBattle || this.#contentBattle) return { ok: false, reason: 'busy' };
     l.active = false;
-    l.weeklyDone = true;
-    const gained = l.room * 40;
+    if (!l.practice) l.weeklyDone = true;
+    const gained = l.practice ? 0 : l.room * 40;
     this.#state.materials.starPowder += gained;
     this.saveGame();
     return { ok: true, room: l.room, reward: { starPowder: gained } };
@@ -2162,6 +2209,7 @@ export default class GameStore {
   /** 0.8초(2배속 0.4초) 서브 배틀 틱. subBattle이 없으면 null을 반환한다. app.js의 공용
    * 배틀 타이머 → adventureView.js의 tickAdventure()가 store.subBattle이 있을 때만 호출한다. */
   tickSubBattle() {
+    this.#rolloverIfNeeded();
     if (!this.#subBattle) return null;
     const b = this.#subBattle;
     const result = this.#tickBattleState(b);
@@ -2195,14 +2243,14 @@ export default class GameStore {
       out = { mode: 'tower', floor: this.#state.tower.floor, clearedFloor: floor, reward };
     } else {
       const l = this.#state.labyrinth;
-      if (b.pendingBuffId) l.buffs.push(b.pendingBuffId);
+      if (b.pendingBuffId && !l.buffs.includes(b.pendingBuffId)) l.buffs.push(b.pendingBuffId);
+      delete l.choices;
       l.room += 1;
       if (l.room >= 5) {
         l.active = false;
-        l.weeklyDone = true;
-        this.#state.starBond += 75;
-        this.#trackMission('labyrinthRuns', 1);
-        out = { mode: 'labyrinth', completed: true, room: l.room, reward: { starBond: 75 } };
+        if (!l.practice) { l.weeklyDone = true; this.#state.starBond += 75; this.#trackMission('labyrinthRuns', 1); }
+        this.#completeContent('relic');
+        out = { mode: 'labyrinth', completed: true, room: l.room, reward: { starBond: l.practice ? 0 : 75 } };
       } else {
         out = { mode: 'labyrinth', completed: false, room: l.room };
       }
@@ -2218,11 +2266,11 @@ export default class GameStore {
    * 건드리지 않는다 — 서브 배틀에는 코메백 보너스가 적용되지 않는다(의도적). */
   #resolveSubBattleDefeat() {
     const b = this.#subBattle;
-    const forecast = this.#battleForecastRace(b.enemyMaxHp);
+    const forecast = b.combat ? { verdict: 'snapshot' } : this.#battleForecastRace(b.enemyMaxHp);
     let reasonText;
     if (forecast.verdict === '공격력 부족') reasonText = `공격력 부족 · 약 ${forecast.attackGapPct > 0n ? forecast.attackGapPct : 1n}% 더 필요`;
     else if (forecast.verdict === '생존력 부족') reasonText = `생존력 부족 · 약 ${forecast.hpGapPct > 0n ? forecast.hpGapPct : 1n}% 더 필요`;
-    else reasonText = '근소한 차이로 패배(변동성)';
+    else reasonText = b.combat ? '유물 조합과 파티 성장을 확인해주세요.' : '근소한 차이로 패배(변동성)';
     const survivedSec = Math.round(b.elapsedMs / 1000);
 
     let out;
@@ -2231,8 +2279,8 @@ export default class GameStore {
     } else {
       const l = this.#state.labyrinth;
       l.active = false;
-      l.weeklyDone = true;
-      const gained = l.room * 40;
+      if (!l.practice) l.weeklyDone = true;
+      const gained = l.practice ? 0 : l.room * 40;
       this.#state.materials.starPowder += gained;
       out = { mode: 'labyrinth', survivedSec, reasonText, room: l.room, reward: { starPowder: gained } };
     }
@@ -2251,7 +2299,200 @@ export default class GameStore {
   /** 현재 미궁 방(state.labyrinth.room)의 사전 판정. 런이 비활성이면 null. */
   labyrinthForecast() {
     if (!this.#state.labyrinth.active) return null;
-    return this.#battleForecastRace(this.#battle.enemyMaxHp);
+    return this.#battleForecastRace(this.#state.labyrinth.enemyHp ?? this.#statsAtStage(40).hp);
+  }
+
+  // -------------------------------------------------------------- 콘텐츠 확장
+  contentUnlockStage() {
+    return Math.max(this.#state.tierProgress.easy.maxStageCleared || 0,
+      this.#state.difficultyTier === 'easy' ? this.#battle.maxStageCleared : 0,
+      this.#state.unlocked.normalTier ? 50 : 0);
+  }
+
+  #completeContent(id) {
+    if (this.#state.content.completed.includes(id)) return false;
+    this.#state.content.completed.push(id);
+    return true;
+  }
+
+  contentBadgeLabel(id) {
+    if (id === 'relic') return '꿈의 유물 수집가';
+    if (id === 'relay') return '두 별의 원정대';
+    if (id === 'side') return '잠든 숲의 별지기';
+    const e = EPISODES.find(x => x.id === id); if (e) return `${e.hero} · ${e.title}`;
+    const lesson = LESSONS.find(x => `lesson-${x.id}` === id); if (lesson) return lesson.title;
+    const d = DISCOVERIES.find(x => x.id === id); if (d) return d.label;
+    if (id.startsWith('boss-')) return `${id.split('-')[1]}단계 · ${id.endsWith('roles') ? '다채로운 관측' : '자립하는 관측'}`;
+    if (id.startsWith('weekly-')) return `${WEEKLY_RULES.find(r => r.id === id.slice(7))?.title || '별자리'} 관측가`;
+    return '별빛 기록';
+  }
+
+  finishEpisode(id) {
+    const e = EPISODES.find(x => x.id === id);
+    if (!e || !this.#state.heroes[e.hero] || this.#state.heroes[e.hero].bond < e.bond) return { ok: false, reason: 'locked' };
+    const first = this.#completeContent(id); this.saveGame(); return { ok: true, first };
+  }
+
+  discoveryAvailable(id) {
+    const d = DISCOVERIES.find(x => x.id === id);
+    return !!d && this.contentUnlockStage() >= 10 && (this.#state.clearedStages.includes(d.stage) || this.contentUnlockStage() >= d.stage);
+  }
+
+  claimDiscovery(id) {
+    if (!this.discoveryAvailable(id)) return { ok: false, reason: 'locked' };
+    const first = this.#completeContent(id); this.saveGame(); return { ok: true, first };
+  }
+
+  availableDecorations() {
+    const done = this.#state.content.completed;
+    const ids = ['lantern', 'seed'];
+    if (done.some(x => x.startsWith('bond-'))) ids.push('book');
+    if ([0, 1, 2, 3, 4].some(i => DISCOVERIES.filter(d => d.chapter === i).every(d => done.includes(d.id)))) ids.push('telescope');
+    if (done.some(x => x.startsWith('boss-'))) ids.push('shield');
+    if (done.includes('relay')) ids.push('flag');
+    return ids;
+  }
+
+  equipContentBadge(id) {
+    if (id !== null && !this.#state.content.completed.includes(id)) return { ok: false };
+    this.#state.content.equippedBadge = id; this.saveGame(); return { ok: true };
+  }
+
+  decorateVillage({ theme, slots, representative }) {
+    const c = this.#state.content;
+    const themes = ['night', 'dawn', ...(c.completed.includes('side') ? ['forest'] : [])];
+    if (!themes.includes(theme) || !Array.isArray(slots) || slots.length !== 3 || slots.some(x => x !== null && !this.availableDecorations().includes(x))) return { ok: false };
+    if (new Set(slots.filter(Boolean)).size !== slots.filter(Boolean).length) return { ok: false, reason: 'duplicate' };
+    if (representative !== null && !this.#state.heroes[representative]) return { ok: false };
+    c.theme = theme; c.decorationSlots = [...slots]; c.representative = representative; this.saveGame(); return { ok: true };
+  }
+
+  weeklyContentInfo() {
+    const actual = localWeekKey();
+    const week = actual < this.#state.content.latestWeek ? this.#state.content.latestWeek : actual;
+    // 날짜 문자열을 UTC로 계산하므로 로컬 DST와 무관하게 고정된 순환.
+    const index = ((Math.floor(Date.parse(`${week}T00:00:00Z`) / 604800000) % WEEKLY_RULES.length) + WEEKLY_RULES.length) % WEEKLY_RULES.length;
+    return { week, ...WEEKLY_RULES[index], bestMs: this.#state.content.weeklyRecords[week] || null };
+  }
+
+  #captureContentParty(party, stage, loan = false) {
+    // 계산하는 동안에만 컨텍스트를 교체하고 즉시 원본 객체를 복원한다. 저장/비동기 호출 없음.
+    const original = { party: this.#state.party, heroes: this.#state.heroes, account: this.#state.account, battle: this.#battle };
+    try {
+      this.#state.party = party.map(s => s ? { ...s } : null);
+      if (loan) {
+        this.#state.heroes = Object.fromEntries(LOAN_HEROES.map(name => [name, { ...createHeroRecord(), level: 20, star: 2 }]));
+        this.#state.account = { ...original.account, level: 20 };
+      }
+      this.#battle = { ...INITIAL_BATTLE, stage, attackLevel: loan ? 1 : original.battle.attackLevel, consecutiveLosses: 0 };
+      this.recomputePartyStats();
+      return { party: this.#state.party.map(s => s ? { ...s } : null), heroes: structuredClone(this.#state.heroes),
+        attack: this.effectiveAttack(), partyMaxHp: this.#battle.partyMaxHp, slotShares: [...this.#battle.slotShares], stage,
+        ultimate: loan || this.#state.unlocked.ultimate, ultimateMode: loan ? 'auto' : this.#state.ultimateMode };
+    } finally {
+      this.#state.party = original.party; this.#state.heroes = original.heroes; this.#state.account = original.account; this.#battle = original.battle;
+    }
+  }
+
+  startContentBattle(kind, id = '', options = {}) {
+    if (this.#contentBattle || this.#subBattle || this.#busy) return { ok: false, reason: 'busy' };
+    const maxStage = this.contentUnlockStage();
+    let stage = 10, hp, party = this.#state.party, lesson, weekly, relayTeams;
+    if (kind === 'lesson') {
+      lesson = LESSONS.find(x => x.id === id);
+      if (maxStage < 10 || !lesson) return { ok: false, reason: 'locked' };
+      party = options.party;
+      if (!Array.isArray(party) || party.length !== 5 || party.some(s => s && (!LOAN_HEROES.includes(s.name) || !['front', 'back'].includes(s.row)))) return { ok: false, reason: 'party' };
+      if (party.filter(Boolean).length !== lesson.members || new Set(party.filter(Boolean).map(s => s.name)).size !== lesson.members) return { ok: false, reason: 'party' };
+      stage = lesson.stage; hp = lesson.enemyHp;
+    } else if (kind === 'boss') {
+      stage = Number(id);
+      if (![10, 20].includes(stage) || maxStage < stage) return { ok: false, reason: 'locked' };
+      hp = this.#statsAtStage(stage).hp;
+    } else if (kind === 'weekly') {
+      if (maxStage < 30) return { ok: false, reason: 'locked' };
+      stage = 30; hp = this.#statsAtStage(stage).hp; weekly = this.weeklyContentInfo();
+    } else if (kind === 'relay') {
+      if (maxStage < 50 || Object.keys(this.#state.heroes).length < 10) return { ok: false, reason: 'locked' };
+      relayTeams = options.teams;
+      if (!Array.isArray(relayTeams) || relayTeams.length !== 2 || relayTeams.some(t => !Array.isArray(t) || t.length !== 5 || t.some(s => !s || !this.#state.heroes[s.name] || !['front', 'back'].includes(s.row))) || new Set(relayTeams.flat().map(s => s.name)).size !== 10) return { ok: false, reason: 'party' };
+      stage = 30; hp = this.#statsAtStage(stage).hp; party = relayTeams[0];
+    } else if (kind === 'side') {
+      if (maxStage < 50) return { ok: false, reason: 'locked' };
+      const index = Number(id);
+      if (!Number.isInteger(index) || index < 0 || index > 4 || index > this.#state.content.sideProgress) return { ok: false, reason: 'locked' };
+      stage = [31, 33, 35, 38, 40][index]; hp = this.#statsAtStage(stage).hp;
+    } else return { ok: false, reason: 'invalid' };
+    if (!party.some(Boolean)) return { ok: false, reason: 'party' };
+    const combat = this.#captureContentParty(party, stage, kind === 'lesson');
+    const b = { mode: kind, id: String(id), stage, combat, enemyHp: hp, enemyMaxHp: hp, partyHp: combat.partyMaxHp, partyMaxHp: combat.partyMaxHp,
+      elapsedMs: 0, partyIndex: 0, ultimateCooldowns: combat.ultimate ? [...INITIAL_BATTLE.ultimateCooldowns] : null,
+      resist: lesson?.resist || weekly?.resist, lesson, weekly, leg: 0, totalMs: 0 };
+    if (relayTeams) b.teams = relayTeams.map(t => this.#captureContentParty(t, stage));
+    this.#resetBattleEffects(b);
+    if (weekly?.healPermille) b.healBudget = b.healBudget * BigInt(weekly.healPermille) / 1000n;
+    if (weekly) this.#state.content.latestWeek = weekly.week;
+    this.#contentBattle = b; this.#contentResult = null; this.saveGame(); return { ok: true };
+  }
+
+  abandonContentBattle() {
+    if (!this.#contentBattle) return { ok: false };
+    this.#contentResult = { success: false, message: '도전을 중단했습니다. 참가 비용과 잃는 보상은 없습니다.' };
+    this.#contentBattle = null; return { ok: true };
+  }
+
+  fireContentUltimate(index) {
+    const b = this.#contentBattle;
+    if (!b || !b.combat.party[index] || !b.ultimateCooldowns || b.ultimateCooldowns[index] > 0) return { ok: false };
+    const fired = this.#fireUltimate(b, index);
+    if (b.enemyHp <= 0n) this.#finishContentBattle(true);
+    return { ok: true, ...fired };
+  }
+
+  tickContentBattle() {
+    const b = this.#contentBattle;
+    if (!b || this.#busy) return null;
+    const result = this.#tickBattleState(b);
+    if (b.enemyHp <= 0n) this.#finishContentBattle(true);
+    else if (b.partyHp <= 0n || b.elapsedMs >= 800 * 3000) this.#finishContentBattle(false);
+    return result;
+  }
+
+  #finishContentBattle(won) {
+    const b = this.#contentBattle; if (!b) return;
+    if (won && b.mode === 'relay' && b.leg === 0) {
+      b.leg = 1; b.totalMs = b.elapsedMs; b.elapsedMs = 0; b.partyIndex = 0;
+      b.combat = b.teams[1]; b.enemyHp = b.enemyMaxHp; b.partyMaxHp = b.combat.partyMaxHp; b.partyHp = b.partyMaxHp;
+      b.ultimateCooldowns = b.combat.ultimate ? [...INITIAL_BATTLE.ultimateCooldowns] : null;
+      this.#resetBattleEffects(b); return;
+    }
+    let message = won ? '도전 완료! 기록이 저장되었습니다.' : '이번 도전은 끝났어요. 편성과 성장을 바꿔 무료로 다시 도전할 수 있어요.';
+    if (won) {
+      if (b.mode === 'lesson') {
+        if (lessonSatisfied(b.lesson.rule, b.combat.party, heroRoleOf)) this.#completeContent(`lesson-${b.id}`);
+        else { won = false; message = `전투에는 승리했지만 학습 조건을 충족하지 못했어요. ${b.lesson.hint}`; }
+      }
+      if (b.mode === 'boss') {
+        const roles = b.combat.party.filter(Boolean).map(s => heroRoleOf(s.name));
+        const marks = [];
+        if (new Set(roles).size >= 3) { this.#completeContent(`boss-${b.id}-roles`); marks.push('서로 다른 역할 3종'); }
+        if (!roles.includes('지원')) { this.#completeContent(`boss-${b.id}-solo`); marks.push('지원 없이 승리'); }
+        message = marks.length ? `관측 완료 · ${marks.join(' / ')}` : '보스 처치 완료. 선택 과제는 다음 도전에서 달성할 수 있어요.';
+      }
+      if (b.mode === 'weekly') {
+        const records = this.#state.content.weeklyRecords, key = b.weekly.week;
+        records[key] = Math.min(records[key] ?? Infinity, b.elapsedMs);
+        const keys = Object.keys(records).sort(); while (keys.length > 156) delete records[keys.shift()];
+        this.#completeContent(`weekly-${b.weekly.id}`);
+      }
+      if (b.mode === 'relay') this.#completeContent('relay');
+      if (b.mode === 'side') {
+        this.#state.content.sideProgress = Math.max(this.#state.content.sideProgress, Number(b.id) + 1);
+        if (this.#state.content.sideProgress === 5) { this.#completeContent('side'); message = '외전 완료! 결말을 감상하고 마을의 별숲 테마를 장착해보세요.'; }
+      }
+    } else if (b.lesson) message += ` ${b.lesson.hint}`;
+    this.#contentResult = { success: won, message, elapsedMs: b.totalMs + b.elapsedMs, mode: b.mode };
+    this.#contentBattle = null; this.saveGame();
   }
 
   // -------------------------------------------------------------- 미션·수급

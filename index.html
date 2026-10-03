@@ -1062,6 +1062,7 @@
     .exchange-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 10px; }
     .exchange-row button { min-height: 52px; padding: 8px 6px; border: 1px solid var(--line); border-radius: 12px; background: #302b5a; color: inherit; font-size: 9px; font-weight: 800; cursor: pointer; }
   </style>
+  <link rel="stylesheet" href="src/styles/content.css">
 </head>
 <body>
   <aside class="desktop-note" aria-hidden="true">
@@ -1074,7 +1075,7 @@
     <header class="topbar">
       <div class="profile">
         <div class="avatar" id="headerAvatar">🌙</div>
-        <div class="profile-copy"><strong id="headerNickname">별지기</strong><div class="level" id="accountLevelText">LV. 1 · 0%</div></div>
+        <div class="profile-copy"><strong id="headerNickname">별지기</strong><span class="cx-badge" id="cxHeaderBadge"></span><div class="level" id="accountLevelText">LV. 1 · 0%</div></div>
       </div>
       <div class="currency-row">
         <div class="currency"><i>💰</i><span id="goldCount">2.48c</span></div>
@@ -1085,6 +1086,7 @@
     <main class="pages">
       <section class="page placeholder-page" data-page="village">
         <div class="placeholder-hero"><small>STARDUST VILLAGE</small><h2>마을에 별빛이<br>돌아오고 있어요</h2><p id="idleCapText">방치 보상을 모아 천문대를 복구하고 더 먼 별의 길을 열어 보세요.</p></div>
+        <div id="cxVillage" class="content-expansion"></div>
         <div id="idleSystemPanel"></div>
         <div id="dispatchPanel"></div>
         <div class="quest-list" id="buildingList" aria-label="마을 건물 목록"></div>
@@ -1096,20 +1098,23 @@
         <div class="segmented-tabs" id="spiritsSegment">
           <button class="seg-btn active" data-segment="dex">도감</button>
           <button class="seg-btn" data-segment="party">편성</button>
+          <button class="seg-btn" data-segment="stories">인연극장</button>
           <button class="seg-btn" data-segment="growth">성장</button>
         </div>
+        <div class="segment-panel" data-segment-panel="stories"><div id="cxStoryReader" class="content-expansion"></div><div id="cxStories" class="content-expansion"></div></div>
         <div class="segment-panel active" data-segment-panel="dex" id="dexPanel"></div>
         <div class="segment-panel" data-segment-panel="party" id="partyPanel"></div>
         <div class="segment-panel" data-segment-panel="growth" id="growthPanel"></div>
       </section>
 
       <section class="page battle-page" data-page="adventure">
-        <div class="battle-head"><h2>별의 길</h2><span class="auto-badge">자동 전투 중</span></div>
+        <div id="cxResume" class="content-expansion"></div><div class="battle-head"><h2>별의 길</h2><span class="auto-badge">자동 전투 중</span></div>
         <div class="segmented-tabs" id="adventureSegment">
           <button class="seg-btn active" data-segment="path">별의 길</button>
           <button class="seg-btn" data-segment="bounty">현상 수배</button>
           <button class="seg-btn" data-segment="tower">별자리 탑</button>
           <button class="seg-btn" data-segment="labyrinth">꿈의 미궁</button>
+          <button class="seg-btn" data-segment="content">별빛 도전</button>
           <button class="seg-btn" data-segment="memory">보스 회상</button>
         </div>
 
@@ -1177,7 +1182,8 @@
         <div class="segment-panel" data-segment-panel="bounty" id="bountyPanel"></div>
         <div class="segment-panel" data-segment-panel="tower" id="towerPanel"></div>
         <div class="segment-panel" data-segment-panel="labyrinth" id="labyrinthPanel"></div>
-        <div class="segment-panel" data-segment-panel="memory" id="bossMemoryPanel"></div>
+        <div class="segment-panel" data-segment-panel="memory"><div id="bossMemoryPanel"></div><div id="cxBossTasks" class="content-expansion"></div></div>
+        <div class="segment-panel" data-segment-panel="content"><div id="cxArena" class="content-expansion"></div><div id="cxChallenges" class="content-expansion"></div></div>
       </section>
 
       <section class="page summon-page active" data-page="summon">
@@ -1219,6 +1225,7 @@
       </section>
 
       <section class="page placeholder-page" data-page="menu">
+        <div id="cxJournal" class="content-expansion"></div>
         <div class="placeholder-hero"><small>STARGAZER MENU</small><h2>별지기의<br>기록</h2><p>도감, 업적, 우편함과 게임 설정을 확인할 수 있습니다.</p></div>
         <section class="system-card">
           <h3>프로필</h3>

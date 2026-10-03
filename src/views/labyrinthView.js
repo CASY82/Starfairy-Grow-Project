@@ -1,10 +1,11 @@
+import { RELICS } from '../domain/contentCatalog.js';
 import { $ } from '../dom/dom.js';
 
 export function initLabyrinthView({ store, toast, onChange, onNavigateSegment }) {
   $('#labyrinthPanel').addEventListener('click', event => {
     if (event.target.closest('button[data-labyrinth-return]')) { onNavigateSegment('adventure', 'path'); return; }
     if (event.target.closest('button[data-labyrinth-start]')) {
-      const result = store.startLabyrinth();
+      const result = store.startLabyrinth({ practice: event.target.closest('button').dataset.practice === 'true' });
       if (!result.ok) { toast.show(result.reason === 'done' ? '이번 주는 이미 도전했어요.' : '아직 해금되지 않았어요.'); return; }
       toast.show('꿈의 미궁 진입!');
       onChange();
@@ -57,20 +58,18 @@ export function refreshLabyrinthView(store) {
     panel.innerHTML = `
       <div class="content-card">
         <h3>🌙 꿈의 미궁</h3>
-        <p>5개 방을 순서대로 통과하며 버프 카드를 골라 강해집니다. 실패해도 도달한 방 수만큼 별가루를 받습니다. 주 1회만 도전할 수 있어요.</p>
-        <button data-labyrinth-start ${l.weeklyDone ? 'disabled' : ''}>${l.weeklyDone ? '이번 주 완료' : '입장'}</button>
+        <p>5개 방을 순서대로 통과하며 버프 카드를 골라 강해집니다. 실패해도 도달한 방 수만큼 별가루를 받습니다. 주 1회 정산할 수 있으며 연습은 언제든 가능합니다. 유물은 선택한 방부터 적용됩니다.</p>
+        <button data-labyrinth-start ${l.weeklyDone ? 'disabled' : ''}>${l.weeklyDone ? '이번 주 정산 완료' : '보상 도전 입장'}</button><button data-labyrinth-start data-practice="true">보상 없는 연습</button>
       </div>`;
     return;
   }
-  const forecast = store.labyrinthForecast();
-  const badgeClass = forecast.verdict === '예상 승리' ? 'win' : forecast.verdict === '공격력 부족' ? 'atk' : 'hp';
   panel.innerHTML = `
     <div class="content-card">
-      <h3>🌙 ${l.room + 1}번째 방</h3>
-      <p>획득한 버프: ${l.buffs.length ? l.buffs.join(', ') : '없음'}</p>
-      <span class="forecast-badge ${badgeClass}">${forecast.verdict}</span>
+      <h3>🌙 ${l.room + 1}번째 방 ${l.practice ? '· 연습' : ''}</h3>
+      <p>획득한 버프: ${l.buffs.length ? l.buffs.map(id => RELICS.find(r => r.id === id)?.label || '알 수 없는 유물').join(', ') : '없음'}</p>
+      <p>유물 효과는 이 도전에만 적용됩니다. 최대 5개의 서로 다른 유물을 선택할 수 있어요.</p>
       <button data-labyrinth-advance>도전</button>
-      ${l.room > 0 ? `<button data-labyrinth-bank class="secondary">여기서 멈추고 보상 받기(별가루 +${l.room * 40})</button>` : ''}
+      ${l.room > 0 ? `<button data-labyrinth-bank class="secondary">여기서 멈추고 보상 받기(별가루 +${l.practice ? 0 : l.room * 40})</button>` : ''}
     </div>
   `;
 }

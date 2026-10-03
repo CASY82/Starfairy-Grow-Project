@@ -1,3 +1,4 @@
+import { initContentView, refreshContentView, refreshContentArena } from './views/contentView.js';
 import GameStore from './domain/GameStore.js';
 import SoundManager from './audio/SoundManager.js';
 import { formatUnit } from './domain/units.js';
@@ -51,6 +52,7 @@ function refreshAll() {
   refreshSummonView(store);
   refreshMenuView(store);
   refreshIdleSystemsView(store);
+  refreshContentView(store);
   checkTutorialProgress(); // 신규, 함수 맨 끝
 }
 
@@ -87,6 +89,8 @@ initLabyrinthView({ store, toast, onChange: refreshAll, onNavigateSegment: navig
 initSummonView({ store, toast, onPull: (count, bannerType) => cinematic.pull(count, bannerType) });
 initMenuView({ store, toast, onChange: refreshAll });
 initIdleSystemsView({ store, toast, onChange: refreshAll, onNavigate: navigateTo });
+
+initContentView({ store, toast, onChange: refreshAll, onNavigate: navigateTo });
 
 // ------------------------------------------------------------------ 하단 탭
 $$('.nav-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -162,6 +166,12 @@ function startBattleTimer() {
   const interval = BATTLE_TICK_MS[store.state.battleSpeed] ?? 800;
   battleTimer = setInterval(() => {
     if (!document.hidden) {
+      if (store.contentBattle) {
+        store.tickContentBattle();
+        refreshContentArena(store);
+        if (!store.contentBattle) refreshAll();
+        return;
+      }
       const outcome = tickAdventure(store, toast);
       if (outcome?.subBattleResolvedTo) navigateTo('adventure', outcome.subBattleResolvedTo);
     }
